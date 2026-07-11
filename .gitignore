@@ -1,0 +1,42 @@
+# === Secrets / credentials — NEVER commit ===
+.env
+.env.*
+!.env.example
+**/google_token_*.json
+**/google_credentials.json
+**/linkedin_token.json
+**/*_token.json
+**/token.json
+**/client_secret*.json
+*.pem
+*.key
+*.p12
+
+# === Runtime state, databases, logs ===
+data/
+**/*.db
+**/*.sqlite
+**/*.log
+**/*.lock
+
+# === Python envs / caches ===
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# === Node ===
+node_modules/
+
+# === Third-party embedded repo (has its own remote: coleam00/claude-memory-compiler) ===
+compiler/
+
+# === OS / editor cruft ===
+.DS_Store
+*.swp
+.idea/
+.vscode/

@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+#
+# git-merge-concat - Custom merge driver for append-only files
+#
+# Used by git when merging files matched by the "concat-both" driver
+# in .gitattributes. Instead of conflicting, it concatenates additions
+# from both sides.
+#
+# Git calls this with three temp file paths:
+#   $1 = %O (ancestor/base version)
+#   $2 = %A (current/local version - also the output target)
+#   $3 = %B (other/remote version)
+#
+# Exit 0 = merge succeeded (result written to %A)
+# Exit non-zero = merge failed (git treats as conflict)
+
+ANCESTOR="$1"
+LOCAL="$2"
+REMOTE="$3"
+
+# If ancestor is empty or doesn't exist, both sides created the file independently.
+# Concatenate both, deduplicating exact duplicate lines while preserving order.
+if [ ! -s "$ANCESTOR" ]; then
+    cat "$LOCAL" "$REMOTE" | awk '!seen[$0]++' > "${LOCAL}.merged"
+    mv "${LOCAL}.merged" "$LOCAL"
+    exit 0
+fi
+
+# Normal case: both sides appended to the same base file.
+# Strategy: take the remote version as the base (preserving its order),
+# then append any lines from local that aren't already present.
+#
+# This works because daily logs are append-only - both sides add entries
+# after the ancestor content. Remote's additions stay in place, and
+# local's unique additions get appended at the end.
+
+# Extract lines that are in LOCAL but not in ANCESTOR, preserving order.
+# These are the lines the local side added.
+grep -vFxf "$ANCESTOR" "$LOCAL" > "${LOCAL}.local_additions" 2>/dev/null || true
+
+# Start with the full remote version
+cp "$REMOTE" "${LOCAL}.merged"
+
+# Append local additions that aren't already in the remote version
+if [ -s "${LOCAL}.local_additions" ]; then
+    while IFS= read -r line; do
+        if ! grep -qFx "$line" "${LOCAL}.merged"; then
+            echo "$line" >> "${LOCAL}.merged"
+        fi
+    done < "${LOCAL}.local_additions"
+fi
+
+# Write result
+mv "${LOCAL}.merged" "$LOCAL"
+
+# Clean up
+rm -f "${LOCAL}.local_additions"
+
+exit 0

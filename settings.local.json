@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(launchctl unload *)",
+      "Bash(launchctl load *)",
+      "Bash(launchctl kickstart *)",
+      "Bash(launchctl list *)",
+      "Bash(rm -f /Users/magicman/SecondBrain/.claude/data/chat.db)",
+      "Bash(rm -f /tmp/jasonsecondbrain/*)",
+      "Read(//private/tmp/jasonsecondbrain/**)",
+      "Read(//Users/magicman/SecondBrain/.claude/**)",
+      "Read(//Users/magicman/SecondBrain/Dynamous/**)",
+      "Write(//Users/magicman/SecondBrain/.claude/skills/invoice-router/**)",
+      "Edit(//Users/magicman/SecondBrain/.claude/skills/invoice-router/**)",
+      "Bash(cd /Users/magicman/SecondBrain/.claude/skills/invoice-router && uv run *)",
+      "Write(//Users/magicman/SecondBrain/.claude/skills/meeting-concierge/state.json)",
+      "Write(//Users/magicman/SecondBrain/.claude/skills/meeting-concierge/pending-digest.json)",
+      "Write(//Users/magicman/SecondBrain/.claude/skills/meeting-concierge/fathom-dump.json)",
+      "Edit(//Users/magicman/SecondBrain/.claude/skills/meeting-concierge/state.json)",
+      "Edit(//Users/magicman/SecondBrain/.claude/skills/meeting-concierge/pending-digest.json)",
+      "Write(//Users/magicman/SecondBrain/Dynamous/Memory/drafts/active/**)",
+      "Write(//Users/magicman/SecondBrain/Dynamous/Memory/drafts/sent/**)",
+      "Write(//Users/magicman/SecondBrain/Dynamous/Memory/drafts/expired/**)",
+      "Edit(//Users/magicman/SecondBrain/Dynamous/Memory/drafts/**)"
+    ]
+  }
+}

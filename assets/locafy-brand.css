@@ -1,0 +1,132 @@
+/* ============================================================
+   LOCAFY DOCUMENT BRAND SYSTEM  v1
+   Matches the house style of the Poseidon / Wonderly / Job-Description
+   reports. Render with Chrome headless on macOS (system font = SF Pro).
+   Link via:  <link rel="stylesheet" href="file:///Users/magicman/SecondBrain/.claude/assets/locafy-brand.css">
+   or paste this whole block into a <style> tag.
+   ============================================================ */
+
+:root{
+  --teal:#00A89D; --teal-dark:#018B82; --teal-pale:#E6F7F6;
+  --coral:#F08A5D; --coral-soft:#FBE7DC;
+  --navy:#1E2A38; --navy-soft:#243044;
+  --ink:#3A4654; --body:#4A4A4A; --muted:#7A8794;
+  --line:#E5E7EB; --bg-soft:#F8F9FA;
+  --green:#2ECC71; --green-pale:#E9F9F0;
+  --red:#E5484D; --red-pale:#FDECEC;
+  --amber:#E9A23B; --amber-pale:#FEF6E6;
+}
+
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",system-ui,sans-serif;
+  color:var(--body); font-size:13.5px; line-height:1.62; -webkit-font-smoothing:antialiased;
+}
+@page{ size:letter; margin:0; }                 /* landscape report: size:letter landscape; */
+
+/* ---- page frame ---- */
+.page{ position:relative; width:8.5in; min-height:11in; padding:0.7in 0.75in 0.95in; page-break-before:always; background:#fff; }
+.page:first-child{ page-break-before:auto; }
+.page.land{ width:11in; min-height:8.5in; }     /* landscape variant */
+.toprule{ position:absolute; top:0; left:0; right:0; height:6px; background:var(--teal); }
+
+/* ---- header (interior / one-pager) ---- */
+.hdr{ display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:22px; }
+.hdr img{ height:26px; }
+.hdr .eyebrow{ text-align:right; }
+.eyebrow{ color:var(--teal); font-weight:700; font-size:11px; letter-spacing:.18em; text-transform:uppercase; }
+.eyebrow .sub{ display:block; color:var(--muted); font-weight:400; letter-spacing:.02em; font-size:11px; margin-top:2px; }
+
+/* ---- hero ---- */
+.pill{ display:inline-block; background:var(--coral); color:#fff; font-size:10.5px; font-weight:700;
+       letter-spacing:.14em; text-transform:uppercase; padding:5px 13px; border-radius:20px; }
+h1.hero{ font-size:40px; line-height:1.04; font-weight:800; color:var(--navy); letter-spacing:-.01em; margin:14px 0 10px; }
+.lede{ font-size:15px; color:var(--ink); max-width:42em; }
+
+/* ---- section headers ---- */
+.sec{ display:flex; align-items:center; gap:9px; margin:26px 0 14px; }
+.sec .bar{ width:4px; height:18px; background:var(--teal); border-radius:2px; }
+.sec h3{ font-size:13px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--navy); }
+h2.title{ font-size:27px; font-weight:800; color:var(--navy); letter-spacing:-.01em; margin:4px 0 6px; }
+.subhead{ color:var(--muted); font-size:14px; margin-bottom:6px; }
+
+/* ---- meta strip (key facts row) ---- */
+.meta{ display:flex; gap:0; border-top:0; margin:18px 0; }
+.meta .cell{ flex:1; border-top:3px solid var(--teal); padding:12px 16px 12px 0; margin-right:24px; }
+.meta .cell:last-child{ margin-right:0; }
+.meta .k{ color:var(--teal); font-size:10px; font-weight:700; letter-spacing:.13em; text-transform:uppercase; }
+.meta .v{ color:var(--navy); font-weight:700; font-size:16px; margin-top:5px; }
+
+/* ---- KPI stat cards ---- */
+.kpis{ display:flex; gap:16px; margin:18px 0; }
+.kpi{ flex:1; border:1px solid var(--line); border-top:3px solid var(--teal); border-radius:8px; padding:15px 16px; }
+.kpi .n{ color:var(--teal); font-size:30px; font-weight:800; line-height:1; }
+.kpi .k{ color:var(--navy); font-size:10.5px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; margin:8px 0 5px; }
+.kpi .d{ color:var(--muted); font-size:12px; line-height:1.45; }
+
+/* ---- text & lists ---- */
+p{ margin:0 0 10px; }
+strong{ color:var(--navy); font-weight:700; }
+code,.chip{ font-family:"SF Mono",ui-monospace,Menlo,monospace; background:var(--bg-soft); border:1px solid var(--line);
+       color:var(--teal-dark); font-size:.86em; padding:1px 6px; border-radius:5px; }
+ul{ list-style:none; }
+ul li{ position:relative; padding-left:18px; margin:7px 0; }
+ul li::before{ content:""; position:absolute; left:3px; top:8px; width:5px; height:5px; border-radius:50%; background:var(--teal); }
+ul.arrow li::before{ content:"\2794"; left:0; top:0; width:auto; height:auto; background:none; color:var(--teal); font-size:.9em; }
+
+/* ---- two-column ---- */
+.cols{ display:flex; gap:36px; margin:14px 0; }
+.cols > div{ flex:1; }
+.colhead{ font-size:13px; font-weight:700; color:var(--navy); padding-bottom:7px; border-bottom:1px solid var(--line); margin-bottom:9px; }
+
+/* ---- callout boxes ---- */
+.box{ border-radius:8px; padding:15px 18px; margin:16px 0; font-size:13px; }
+.box .lbl{ font-size:10.5px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; margin-bottom:6px; display:block; }
+.box.coral{ background:var(--coral); color:#fff; } .box.coral .lbl{ color:#fff; opacity:.9; }
+.box.soft{ background:var(--bg-soft); border-left:4px solid var(--teal); } .box.soft .lbl{ color:var(--teal); }
+.box.green{ background:var(--green-pale); border-left:4px solid var(--green); } .box.green .lbl{ color:#1B9E55; }
+.box.amber{ background:var(--amber-pale); border:1px solid #F3D896; } .box.amber .lbl{ color:#B97D17; }
+.box.navy{ background:var(--navy); color:#D7DEE6; } .box.navy .lbl{ color:var(--teal); }
+.box.navy strong{ color:#fff; }
+
+/* ---- bordered cards (required/bonus etc.) ---- */
+.cardrow{ display:flex; gap:20px; margin:14px 0; }
+.card{ flex:1; border:1px solid var(--line); border-left:4px solid var(--teal); border-radius:8px; padding:14px 18px; }
+.card.red{ border-left-color:var(--red); } .card.green{ border-left-color:var(--green); }
+.card .lbl{ font-size:11px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--navy); margin-bottom:8px; }
+
+/* ---- pricing card ---- */
+.price{ border-radius:10px; padding:20px 22px; }
+.price.fill{ background:var(--teal); color:#fff; } .price.plain{ background:var(--bg-soft); border:1px solid var(--line); }
+.price .row{ display:flex; justify-content:space-between; align-items:baseline; padding:9px 0; border-bottom:1px solid rgba(255,255,255,.18); }
+.price.plain .row{ border-bottom-color:var(--line); }
+.price .amt{ font-size:24px; font-weight:800; }
+
+/* ---- tables ---- */
+table{ width:100%; border-collapse:collapse; margin:12px 0; font-size:12.5px; }
+th{ background:var(--teal); color:#fff; text-align:left; padding:9px 11px; font-weight:600; letter-spacing:.02em; }
+td{ padding:9px 11px; border:1px solid var(--line); }
+tr:nth-child(even) td{ background:var(--bg-soft); }
+tr.hl td{ background:var(--teal-pale); }
+
+/* ---- dark CTA bar ---- */
+.cta{ display:flex; justify-content:space-between; align-items:center; background:var(--navy); color:#fff; border-radius:10px; padding:18px 22px; margin-top:22px; }
+.cta .btn{ background:var(--coral); color:#fff; font-weight:700; letter-spacing:.1em; text-transform:uppercase; font-size:12px; padding:12px 18px; border-radius:7px; }
+
+/* ---- footer ---- */
+.foot{ position:absolute; left:0.75in; right:0.75in; bottom:0.45in; display:flex; justify-content:space-between;
+       font-size:10.5px; color:var(--muted); border-top:1px solid var(--line); padding-top:9px; }
+.foot .mid{ color:var(--coral); font-weight:700; letter-spacing:.12em; text-transform:uppercase; }
+
+/* ---- COVER ---- */
+.cover{ position:relative; width:8.5in; height:11in; background:linear-gradient(150deg,var(--teal) 0%,var(--teal-dark) 100%);
+        color:#fff; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; page-break-after:always; }
+.cover.land{ width:11in; height:8.5in; }
+.cover .mark{ font-size:30px; font-weight:800; letter-spacing:.32em; margin-bottom:34px; }   /* white wordmark */
+.cover .mark img{ height:44px; }                                                              /* or logo in chip */
+.cover .chip{ background:#fff; border-radius:12px; padding:14px 22px; margin-bottom:34px; }
+.cover h1{ font-size:46px; font-weight:800; line-height:1.05; max-width:14em; }
+.cover .sub{ font-size:17px; opacity:.92; margin-top:14px; max-width:34em; }
+.cover .ghost{ display:inline-block; border:1.5px solid rgba(255,255,255,.6); color:#fff; font-size:11px; font-weight:700;
+        letter-spacing:.2em; text-transform:uppercase; padding:11px 20px; border-radius:6px; margin-top:30px; }
+.cover .strip{ position:absolute; bottom:0; left:0; right:0; height:14px; background:var(--coral); }

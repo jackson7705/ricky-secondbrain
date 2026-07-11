@@ -1,0 +1,57 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Bash|Grep|Edit|Write|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR/.claude/scripts\" && PATH=\"$PATH:/opt/homebrew/bin:/Users/magicman/.local/bin\" uv run python \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-secrets.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR/.claude/compiler\" && PATH=\"$PATH:/opt/homebrew/bin:/Users/magicman/.local/bin\" uv run python \"$CLAUDE_PROJECT_DIR/.claude/compiler/hooks/pre-compact.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "prompt_input_exit|clear|other",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR/.claude/compiler\" && PATH=\"$PATH:/opt/homebrew/bin:/Users/magicman/.local/bin\" uv run python \"$CLAUDE_PROJECT_DIR/.claude/compiler/hooks/session-end.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR/.claude/scripts\" && PATH=\"$PATH:/opt/homebrew/bin:/Users/magicman/.local/bin\" uv run python \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start-context.py\"",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR/.claude/compiler\" && PATH=\"$PATH:/opt/homebrew/bin:/Users/magicman/.local/bin\" uv run python \"$CLAUDE_PROJECT_DIR/.claude/compiler/hooks/session-start.py\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,46 @@
+[project]
+name = "second-brain-heartbeat"
+version = "0.1.0"
+description = "Proactive heartbeat system for Second Brain"
+requires-python = ">=3.12"
+dependencies = [
+    "claude-agent-sdk>=0.1.29",
+    "python-dotenv>=1.0.0",
+    "win10toast-click>=0.1.2; sys_platform == 'win32'",
+    "tzdata>=2024.1",
+    # Phase 3: Memory Search
+    "fastembed>=0.4.0",
+    "sqlite-vec>=0.1.6",
+    "numpy>=1.26.0",
+    # Postgres + pgvector (optional — SQLite used as fallback)
+    "psycopg[binary]>=3.1.0",
+    "pgvector>=0.3.0",
+    # Phase 5: Direct Platform Integrations
+    "google-api-python-client>=2.100.0",
+    "google-auth-oauthlib>=1.2.0",
+    "google-auth-httplib2>=0.2.0",
+    "asana>=5.0.0",
+    "slack-sdk>=3.27.0",
+    # Phase 6: Chat Interface
+    "slack-bolt>=1.20.0",
+    "aiohttp>=3.9.0",
+    "redis>=8.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.8.0",
+    "ruff>=0.2.0",
+    "pytest>=8.0.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
