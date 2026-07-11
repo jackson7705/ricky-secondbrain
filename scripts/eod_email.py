@@ -160,26 +160,12 @@ def main(dry_run: bool) -> int:
 
 
 def _ping(previews: list[str]) -> None:
-    import urllib.parse
-    import urllib.request
-
-    from config import BLUEBUBBLES_PASSWORD, BLUEBUBBLES_URL, OWNER_IMESSAGE_GUID
+    from notify_owner import notify_owner
     text = ("📥 End-of-day email triage — I drafted " + str(len(previews)) +
             " repl(y/ies) (they're in your Gmail Drafts, nothing sent):\n\n" +
             "\n".join(previews) +
             "\n\nReply e.g. \"send 1\", \"send all\", or \"edit 2\" — I won't send anything until you say so.")
-    if not BLUEBUBBLES_URL or not BLUEBUBBLES_PASSWORD:
-        print("  [skip] BlueBubbles not configured — summary:\n" + text)
-        return
-    url = f"{BLUEBUBBLES_URL}/api/v1/message/text?password={urllib.parse.quote(BLUEBUBBLES_PASSWORD)}"
-    body = json.dumps({"chatGuid": OWNER_IMESSAGE_GUID, "message": text[:1600],
-                       "method": "apple-script",
-                       "tempGuid": f"eod-{int(datetime.now().timestamp()*1000)}"}).encode()
-    try:
-        urllib.request.urlopen(urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}), timeout=20)
-        print("  texted Jason the triage ✓")
-    except Exception as exc:  # noqa: BLE001
-        print(f"  [warn] iMessage ping failed: {str(exc)[:60]}")
+    notify_owner(text[:1600])
 
 
 if __name__ == "__main__":

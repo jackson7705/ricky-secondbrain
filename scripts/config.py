@@ -192,6 +192,30 @@ CHAT_MAX_TURNS = int(os.getenv("CHAT_MAX_TURNS", "500"))
 CHAT_MAX_BUDGET_USD = float(os.getenv("CHAT_MAX_BUDGET_USD", "100.0"))
 CHAT_ALLOWED_USERS = os.getenv("CHAT_ALLOWED_USERS", SLACK_OWNER_USER_ID).split(",")
 
+# Discord chat surface (works on any OS — unlike BlueBubbles)
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
+DISCORD_ALLOWED_USER_IDS = [
+    u.strip() for u in os.getenv("DISCORD_ALLOWED_USER_IDS", "").split(",") if u.strip()
+]
+
+# Telegram chat surface (works on any OS)
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_ALLOWED_USER_IDS = [
+    u.strip() for u in os.getenv("TELEGRAM_ALLOWED_USER_IDS", "").split(",") if u.strip()
+]
+
+# === Owner notifications (where autonomous jobs send one-way pings) ===
+# Which surface job notifications go to: bluebubbles | telegram | discord | slack.
+# Defaults to bluebubbles if OWNER_PHONE is set (Jason), else the first surface
+# that's configured. Lets a Mac-less teammate get pings on Telegram/Discord.
+OWNER_NOTIFY_CHANNEL = os.getenv("OWNER_NOTIFY_CHANNEL", "").strip().lower()
+# Telegram: the chat id to DM (usually the same as the owner's user id).
+OWNER_TELEGRAM_CHAT_ID = os.getenv("OWNER_TELEGRAM_CHAT_ID", "").strip()
+# Discord: a webhook URL for one-way notifications (simplest; no bot needed).
+OWNER_DISCORD_WEBHOOK_URL = os.getenv("OWNER_DISCORD_WEBHOOK_URL", "").strip()
+# Slack: channel/DM id to post notifications to (uses SLACK_BOT_TOKEN).
+OWNER_SLACK_NOTIFY_CHANNEL = os.getenv("OWNER_SLACK_NOTIFY_CHANNEL", "").strip()
+
 # iMessage / BlueBubbles
 BLUEBUBBLES_URL = os.getenv("BLUEBUBBLES_URL", "").rstrip("/")
 BLUEBUBBLES_PASSWORD = os.getenv("BLUEBUBBLES_PASSWORD", "")

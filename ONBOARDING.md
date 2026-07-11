@@ -15,7 +15,7 @@ in its own ClickUp, and remembers its own things.
 
 | Layer | What it is |
 |---|---|
-| **Chat engine** (`.claude/chat/`) | Long-running process bridging **BlueBubbles/iMessage** ↔ Claude Agent SDK. This is "talking to Ricky." |
+| **Chat engine** (`.claude/chat/`) | Long-running process bridging a **chat surface** (Telegram / Discord / iMessage / Slack — any or several) ↔ Claude Agent SDK. This is "talking to Ricky." |
 | **Autonomous jobs** (`.claude/scripts/`) | Scheduled scripts: `loose_ends` (inbox→tasks), `fathom_sweep` (meetings→tasks), `eod_email` (draft replies), `heartbeat`, daily briefs, invoice router, memory tools. |
 | **Skills** (`.claude/skills/`) | Reusable capabilities: email-triage, invoice-router, locafy-documents (branded PDFs), direct-integrations, design-system, etc. |
 | **Memory vault** (`Dynamous/`) | An Obsidian vault, git-synced. Ricky's long-term memory. **Per-person.** |
@@ -31,7 +31,8 @@ identity) and a few OAuth token files — none of which are in git.
 Create/collect these first — the config step needs them:
 
 - [ ] **Claude Code** subscription + login (`claude` CLI)
-- [ ] **Apple ID** signed into Messages on this Mac (for iMessage)
+- [ ] **A chat surface** — a Telegram or Discord bot (any OS), or an Apple ID +
+      Mac for iMessage/BlueBubbles. Pick whatever fits their machine.
 - [ ] **Google account** (Gmail + Calendar + Drive) they'll let Ricky act as
 - [ ] **ClickUp** account + a personal API token + an "Inbox" list
 - [ ] *(optional)* **Fathom** API key — meeting action items
@@ -78,8 +79,8 @@ The file itself documents every key; the essentials:
 | `OWNER_PHONE` | Their mobile, digits only w/ country code (e.g. `14155550123`) |
 | `OWNER_EMAILS` | Their work emails, comma-separated |
 | `OWNER_LAUNCHD_SLUG` | Job namespace, e.g. `taylorsecondbrain` (defaults to `<macuser>secondbrain`) |
-| `BLUEBUBBLES_URL` / `BLUEBUBBLES_PASSWORD` | From the BlueBubbles server app (below) |
-| `IMESSAGE_ALLOWED_ADDRESSES` | Their phone/email — only these can command Ricky |
+| *chat surface* | Pick ≥1: Telegram / Discord / BlueBubbles / Slack keys — see step 1 below |
+| `OWNER_NOTIFY_CHANNEL` | Where job pings go: `telegram`/`discord`/`bluebubbles`/`slack` (blank = auto) |
 | `DEFAULT_GOOGLE_ACCOUNT` | The OAuth profile name they'll authorize |
 | `GOOGLE_CALENDAR_ID` | `primary` or a specific calendar |
 | `DRIVE_BRIEFINGS_FOLDER_ID` | Drive folder id (from its URL) where Ricky uploads docs |
@@ -90,13 +91,36 @@ The file itself documents every key; the essentials:
 
 ## Manual steps (the parts only a human can do)
 
-### 1. BlueBubbles (iMessage bridge)
+### 1. Chat surface — pick at least one (talk to Ricky)
+Ricky listens on any combination of these at once. **BlueBubbles is Mac-only**;
+Telegram and Discord work on any OS, so use those on Windows/Linux (or by
+preference). Set the matching keys in `.env`, then `doctor.sh` step [3b] lists
+what's configured.
+
+**Telegram (easiest, any OS)**
+1. Message **@BotFather** → `/newbot` → copy the token → `TELEGRAM_BOT_TOKEN`.
+2. Get your numeric id from **@userinfobot** → `TELEGRAM_ALLOWED_USER_IDS`.
+3. (For job pings) set `OWNER_TELEGRAM_CHAT_ID` to that same id.
+
+**Discord (any OS)**
+1. https://discord.com/developers → New Application → **Bot** → copy token → `DISCORD_BOT_TOKEN`.
+2. Enable **Message Content Intent** (Bot settings).
+3. Enable Developer Mode → right-click yourself → Copy User ID → `DISCORD_ALLOWED_USER_IDS`.
+4. Install the extra: `cd .claude/scripts && uv sync --extra discord`.
+5. (For job pings) create a channel Webhook → `OWNER_DISCORD_WEBHOOK_URL`.
+
+**iMessage via BlueBubbles (Mac only)**
 1. Install the **BlueBubbles Server** on this Mac → https://bluebubbles.app
 2. Sign it into the teammate's iMessage account.
 3. Set a **server password**, enable the **Private API**.
-4. Put the URL (default `http://localhost:1234`) + password into `.env`
-   (`BLUEBUBBLES_URL`, `BLUEBUBBLES_PASSWORD`).
-5. `doctor.sh` step [6] should show **"BlueBubbles up + auth OK (200)"**.
+4. `BLUEBUBBLES_URL` (default `http://localhost:1234`) + `BLUEBUBBLES_PASSWORD` +
+   `IMESSAGE_ALLOWED_ADDRESSES`. `doctor.sh` [6] → **"BlueBubbles up + auth OK (200)"**.
+
+**Slack** — see `.env.example` §11 (`SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN`).
+
+> **Job notifications** (loose_ends / fathom / eod) go to the surface named in
+> `OWNER_NOTIFY_CHANNEL` (`bluebubbles|telegram|discord|slack`); if blank, the
+> first configured one is used. Test it: `uv run python notify_owner.py "hi"`.
 
 ### 2. Google OAuth
 1. https://console.cloud.google.com → new project.

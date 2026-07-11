@@ -196,29 +196,13 @@ def main(dry_run: bool) -> int:
 
 
 def _report(created: list) -> None:
-    import urllib.parse
-    import urllib.request
-
-    from config import BLUEBUBBLES_PASSWORD, BLUEBUBBLES_URL, OWNER_IMESSAGE_GUID
+    from notify_owner import notify_owner
     lines = [f"🧹 Loose ends — filed {len(created)} task(s) from your inbox:"]
     for it, _t in created:
         due = f" (due {it['due']})" if it.get("due") else ""
         lines.append(f"• {it['title']}{due}")
     lines.append("\nAll in your ClickUp Inbox list. Reply if any shouldn't be there.")
-    text = "\n".join(lines)[:1400]
-    if not BLUEBUBBLES_URL or not BLUEBUBBLES_PASSWORD:
-        print("  [skip] BlueBubbles not configured — summary:\n" + text)
-        return
-    url = f"{BLUEBUBBLES_URL}/api/v1/message/text?password={urllib.parse.quote(BLUEBUBBLES_PASSWORD)}"
-    body = json.dumps({"chatGuid": OWNER_IMESSAGE_GUID, "message": text,
-                       "method": "apple-script",
-                       "tempGuid": f"loose-{int(datetime.now().timestamp()*1000)}"}).encode()
-    try:
-        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=20)
-        print("  texted Jason the summary ✓")
-    except Exception as exc:  # noqa: BLE001
-        print(f"  [warn] iMessage report failed: {str(exc)[:60]}")
+    notify_owner("\n".join(lines)[:1400])
 
 
 if __name__ == "__main__":

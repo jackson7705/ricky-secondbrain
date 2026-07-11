@@ -45,11 +45,24 @@ echo
 
 echo "[3] Config (.env)"
 if [ -f "$ENV_FILE" ]; then ok ".env exists"; else bad ".env missing — copy scripts/.env.example → scripts/.env"; fi
-req OWNER_NAME; req OWNER_PHONE; req OWNER_EMAILS
-req BLUEBUBBLES_URL; req BLUEBUBBLES_PASSWORD; req IMESSAGE_ALLOWED_ADDRESSES
+req OWNER_NAME; req OWNER_EMAILS
 req CLICKUP_API_TOKEN; req CLICKUP_OWNER_UID; req CLICKUP_INBOX_LIST_ID
 req DRIVE_BRIEFINGS_FOLDER_ID
 opt FATHOM_API_KEY; opt REDIS_URL; opt CONTEXT_RETRIEVER_AGENT_KEY; opt APIFY_TOKEN
+echo
+
+echo "[3b] Chat surface (need at least one)"
+declare -a SURF=()
+[ -n "$(envval BLUEBUBBLES_URL)" ] && [ -n "$(envval BLUEBUBBLES_PASSWORD)" ] && [ -n "$(envval IMESSAGE_ALLOWED_ADDRESSES)" ] && SURF+=("iMessage/BlueBubbles")
+[ -n "$(envval TELEGRAM_BOT_TOKEN)" ] && [ -n "$(envval TELEGRAM_ALLOWED_USER_IDS)" ] && SURF+=("Telegram")
+[ -n "$(envval DISCORD_BOT_TOKEN)" ] && [ -n "$(envval DISCORD_ALLOWED_USER_IDS)" ] && SURF+=("Discord")
+[ -n "$(envval SLACK_BOT_TOKEN)" ] && [ -n "$(envval SLACK_APP_TOKEN)" ] && SURF+=("Slack")
+if [ "${#SURF[@]}" -gt 0 ]; then ok "configured: ${SURF[*]}"; else bad "no chat surface configured — set BlueBubbles, Telegram, Discord, or Slack"; fi
+notify="$(envval OWNER_NOTIFY_CHANNEL)"; [ -n "$notify" ] && ok "OWNER_NOTIFY_CHANNEL=$notify" || wrn "OWNER_NOTIFY_CHANNEL unset (auto-picks first configured surface)"
+# Discord extra installed?
+if [ -n "$(envval DISCORD_BOT_TOKEN)" ]; then
+  "$SCRIPTS_DIR/.venv/bin/python3" -c "import discord" 2>/dev/null && ok "discord.py installed" || bad "Discord configured but discord.py missing — run: cd .claude/scripts && uv sync --extra discord"
+fi
 echo
 
 echo "[4] Google OAuth"

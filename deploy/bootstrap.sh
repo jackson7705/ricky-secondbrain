@@ -79,7 +79,7 @@ fi
 
 # ── 7. Manual checklist + launchd ────────────────────────────────────────────
 say "7/7  Remaining manual steps"
-todo "BlueBubbles: install the server app (https://bluebubbles.app) on THIS Mac, sign into iMessage, set a password + enable Private API, then put URL/password in .env."
+todo "Chat surface (pick ≥1): Telegram bot (@BotFather) or Discord bot — work on any OS — or BlueBubbles for iMessage (Mac only). Set the matching keys in .env. See ONBOARDING.md → step 1. (Discord also needs: uv sync --extra discord)"
 todo "Google OAuth: drop google_credentials.json into scripts/integrations/, then: cd .claude/scripts && uv run python setup_auth.py --account <profile>"
 todo "Vault: create your own private vault repo and clone it to $PROJECT_DIR/Dynamous (see ONBOARDING.md → Vault)."
 echo

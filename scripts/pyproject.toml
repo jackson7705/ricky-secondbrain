@@ -33,6 +33,11 @@ dev = [
     "ruff>=0.2.0",
     "pytest>=8.0.0",
 ]
+# Discord chat surface (optional — Telegram uses raw aiohttp, no extra dep).
+# Install with: uv sync --extra discord   (or: uv pip install "discord.py>=2.3")
+discord = [
+    "discord.py>=2.3.0",
+]
 
 [tool.ruff]
 target-version = "py312"
