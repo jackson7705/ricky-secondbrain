@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>__LABEL_PREFIX__.eodemail</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string><string>-c</string>
+    <string>PROJECT_DIR="__PROJECT_DIR__"; SCRIPTS_DIR="$PROJECT_DIR/.claude/scripts"; LOG_DIR="__LOG_DIR__"; mkdir -p "$LOG_DIR"; cd "$SCRIPTS_DIR"; export CLAUDE_PROJECT_DIR="$PROJECT_DIR" PATH="$PATH:/opt/homebrew/bin:__HOME__/.local/bin"; exec uv run python eod_email.py &gt;&gt; "$LOG_DIR/eodemail.log" 2&gt;&amp;1</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>0</integer></dict>
+  <key>StandardOutPath</key><string>__LOG_DIR__/eodemail-stdout.log</string>
+  <key>StandardErrorPath</key><string>__LOG_DIR__/eodemail-stderr.log</string>
+</dict>
+</plist>

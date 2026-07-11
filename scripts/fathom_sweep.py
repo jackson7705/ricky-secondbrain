@@ -25,8 +25,9 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 FATHOM_BASE = "https://api.fathom.ai/external/v1"
 DATA = Path(__file__).resolve().parent.parent / "data" / "state"
 STATE = DATA / "fathom-sweep-state.json"
-INBOX_LIST_ID = "901711572708"
-JASON_UID = 88203799
+from config import CLICKUP_INBOX_LIST_ID as INBOX_LIST_ID  # noqa: E402
+from config import CLICKUP_OWNER_UID as OWNER_UID  # noqa: E402
+from config import OWNER_EMAILS  # noqa: E402
 LOOKBACK_DAYS = 3
 
 
@@ -97,10 +98,11 @@ def main(dry_run: bool) -> int:
             asg = a.get("assignee") or {}
             name = (asg.get("name") or "").strip()
             email = (asg.get("email") or "").lower()
-            is_jason = "jason" in name.lower() or email in ("jason@growthproagency.com", "jason.jackson@locafy.com")
-            # File only Jason's own action items + unassigned ones (his to-dos).
-            # Others' items belong on their plates, not his — skip to avoid noise.
-            if name and not is_jason:
+            first_name = OWNER_EMAILS[0].split("@")[0].split(".")[0] if OWNER_EMAILS else ""
+            is_owner = (first_name and first_name in name.lower()) or (email and email in OWNER_EMAILS)
+            # File only the owner's own action items + unassigned ones (their to-dos).
+            # Others' items belong on their plates — skip to avoid noise.
+            if name and not is_owner:
                 continue
             items.append({"desc": desc, "meeting": m.get("meeting_title") or m.get("title") or "meeting",
                           "date": start[:10], "ts": a.get("recording_timestamp") or "",
@@ -127,7 +129,8 @@ def main(dry_run: bool) -> int:
         if it["assignee"]:
             note += f"\nFathom assignee: {it['assignee']}"
         try:
-            create_task(INBOX_LIST_ID, it["desc"][:120], description=note, assignees=[JASON_UID])
+            create_task(INBOX_LIST_ID, it["desc"][:120], description=note,
+                        assignees=[int(OWNER_UID)] if OWNER_UID else [])
             created.append(it)
             sigs.add(_norm(it["desc"]))
         except Exception as exc:  # noqa: BLE001
@@ -146,7 +149,7 @@ def main(dry_run: bool) -> int:
 def _report(created: list[dict]) -> None:
     import urllib.parse
     import urllib.request
-    from config import BLUEBUBBLES_PASSWORD, BLUEBUBBLES_URL
+    from config import BLUEBUBBLES_PASSWORD, BLUEBUBBLES_URL, OWNER_IMESSAGE_GUID
     lines = [f"🎙️ Meeting action items — filed {len(created)} task(s) from Fathom:"]
     for it in created:
         lines.append(f"• {it['desc'][:80]} ({it['meeting'][:30]})")
@@ -156,7 +159,7 @@ def _report(created: list[dict]) -> None:
         print("  [skip] BlueBubbles not configured — summary:\n" + text)
         return
     url = f"{BLUEBUBBLES_URL}/api/v1/message/text?password={urllib.parse.quote(BLUEBUBBLES_PASSWORD)}"
-    body = json.dumps({"chatGuid": "any;-;+16185582424", "message": text, "method": "apple-script",
+    body = json.dumps({"chatGuid": OWNER_IMESSAGE_GUID, "message": text, "method": "apple-script",
                        "tempGuid": f"fathom-{int(datetime.now().timestamp()*1000)}"}).encode()
     try:
         urllib.request.urlopen(urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}), timeout=20)

@@ -163,7 +163,7 @@ def _ping(previews: list[str]) -> None:
     import urllib.parse
     import urllib.request
 
-    from config import BLUEBUBBLES_PASSWORD, BLUEBUBBLES_URL
+    from config import BLUEBUBBLES_PASSWORD, BLUEBUBBLES_URL, OWNER_IMESSAGE_GUID
     text = ("📥 End-of-day email triage — I drafted " + str(len(previews)) +
             " repl(y/ies) (they're in your Gmail Drafts, nothing sent):\n\n" +
             "\n".join(previews) +
@@ -172,7 +172,7 @@ def _ping(previews: list[str]) -> None:
         print("  [skip] BlueBubbles not configured — summary:\n" + text)
         return
     url = f"{BLUEBUBBLES_URL}/api/v1/message/text?password={urllib.parse.quote(BLUEBUBBLES_PASSWORD)}"
-    body = json.dumps({"chatGuid": "any;-;+16185582424", "message": text[:1600],
+    body = json.dumps({"chatGuid": OWNER_IMESSAGE_GUID, "message": text[:1600],
                        "method": "apple-script",
                        "tempGuid": f"eod-{int(datetime.now().timestamp()*1000)}"}).encode()
     try:

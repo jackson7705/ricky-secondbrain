@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>__LABEL_PREFIX__.vaultsync</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>PROJECT_DIR="__PROJECT_DIR__"; VAULT_DIR="$PROJECT_DIR/Dynamous"; SCRIPTS_DIR="$PROJECT_DIR/.claude/scripts"; LOG_DIR="__LOG_DIR__"; mkdir -p "$LOG_DIR"; cd "$VAULT_DIR"; /bin/bash "$SCRIPTS_DIR/git-sync" sync >> "$LOG_DIR/vaultsync.log" 2>&amp;1</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>120</integer>
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/vaultsync-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/vaultsync-stderr.log</string>
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

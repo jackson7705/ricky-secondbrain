@@ -27,8 +27,8 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 STATE = Path(__file__).resolve().parent.parent / "data" / "state" / "loose-ends-state.json"
-INBOX_LIST_ID = "901711572708"   # ClickUp "Inbox" list — home for auto-captured to-dos
-JASON_UID = 88203799
+from config import CLICKUP_INBOX_LIST_ID as INBOX_LIST_ID  # noqa: E402
+from config import CLICKUP_OWNER_UID as OWNER_UID  # noqa: E402
 ACCOUNTS = ["growthpro", "locafy"]
 LOOKBACK_HOURS = 48
 MAX_EMAILS = 30
@@ -178,7 +178,7 @@ def main(dry_run: bool) -> int:
         desc = f"{it.get('note','')}\n\nAuto-filed by Ricky from inbox — source: {it.get('source','')}"
         try:
             t = create_task(INBOX_LIST_ID, it["title"], description=desc,
-                            due_on=due_on, assignees=[JASON_UID])
+                            due_on=due_on, assignees=[int(OWNER_UID)] if OWNER_UID else [])
             created.append((it, t))
             sigs.add(_norm(it["title"]))
         except Exception as exc:  # noqa: BLE001
@@ -199,7 +199,7 @@ def _report(created: list) -> None:
     import urllib.parse
     import urllib.request
 
-    from config import BLUEBUBBLES_PASSWORD, BLUEBUBBLES_URL
+    from config import BLUEBUBBLES_PASSWORD, BLUEBUBBLES_URL, OWNER_IMESSAGE_GUID
     lines = [f"🧹 Loose ends — filed {len(created)} task(s) from your inbox:"]
     for it, _t in created:
         due = f" (due {it['due']})" if it.get("due") else ""
@@ -210,7 +210,7 @@ def _report(created: list) -> None:
         print("  [skip] BlueBubbles not configured — summary:\n" + text)
         return
     url = f"{BLUEBUBBLES_URL}/api/v1/message/text?password={urllib.parse.quote(BLUEBUBBLES_PASSWORD)}"
-    body = json.dumps({"chatGuid": "any;-;+16185582424", "message": text,
+    body = json.dumps({"chatGuid": OWNER_IMESSAGE_GUID, "message": text,
                        "method": "apple-script",
                        "tempGuid": f"loose-{int(datetime.now().timestamp()*1000)}"}).encode()
     try:

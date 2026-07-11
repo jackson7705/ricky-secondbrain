@@ -56,7 +56,16 @@ CLICKUP_DEFAULT_LIST_NAME = "Inbox"
 # Jason's iMessage handle for outbound briefs — same allowlist as the chat
 # service. The chat service already polls BlueBubbles; we route briefs through
 # a direct REST call since this is one-way notification, not a conversation.
-IMESSAGE_BRIEF_CHAT_GUID = "any;-;+16185582424"
+import os as _os  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv(_Path(__file__).resolve().parents[2] / "scripts" / ".env")
+except Exception:  # noqa: BLE001
+    pass
+IMESSAGE_BRIEF_CHAT_GUID = _os.getenv("OWNER_IMESSAGE_GUID") or (
+    f"any;-;+{_os.getenv('OWNER_PHONE', '').strip().lstrip('+')}"
+    if _os.getenv("OWNER_PHONE") else "")
 
 # Cap on brief length so iMessage doesn't split it awkwardly.
 MAX_BRIEF_CHARS = 600

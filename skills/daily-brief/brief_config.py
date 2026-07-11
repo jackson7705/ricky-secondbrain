@@ -61,8 +61,17 @@ FLAGGED_SENDER_EXCLUDES = [
 
 # ── Brief delivery ──────────────────────────────────────────────────────
 
-# Jason's iMessage handle — same as meeting-concierge.
-IMESSAGE_BRIEF_CHAT_GUID = "any;-;+16185582424"
+# Owner's iMessage handle — from .env (OWNER_IMESSAGE_GUID or OWNER_PHONE).
+import os as _os  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv(_Path(__file__).resolve().parents[2] / "scripts" / ".env")
+except Exception:  # noqa: BLE001
+    pass
+IMESSAGE_BRIEF_CHAT_GUID = _os.getenv("OWNER_IMESSAGE_GUID") or (
+    f"any;-;+{_os.getenv('OWNER_PHONE', '').strip().lstrip('+')}"
+    if _os.getenv("OWNER_PHONE") else "")
 
 # iMessage splits long messages; cap to keep formatting clean.
 MAX_BRIEF_CHARS = 2500

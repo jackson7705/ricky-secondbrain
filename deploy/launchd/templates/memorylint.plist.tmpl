@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>__LABEL_PREFIX__.memorylint</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>-c</string>
+		<string>PROJECT_DIR="__PROJECT_DIR__"; SCRIPTS_DIR="$PROJECT_DIR/.claude/scripts"; LOG_DIR="__LOG_DIR__"; mkdir -p "$LOG_DIR"; cd "$SCRIPTS_DIR"; export CLAUDE_PROJECT_DIR="$PROJECT_DIR" PATH="$PATH:/opt/homebrew/bin:__HOME__/.local/bin"; uv run python memory_lint.py --apply &gt;&gt; "$LOG_DIR/memorylint.log" 2&gt;&amp;1; uv run python memory_lint.py --semantic &gt;&gt; "$LOG_DIR/memorylint.log" 2&gt;&amp;1; echo "[redis-iris refresh]" &gt;&gt; "$LOG_DIR/memorylint.log"; uv run python redis_iris/load_data.py &gt;&gt; "$LOG_DIR/memorylint.log" 2&gt;&amp;1</string>
+	</array>
+	<key>StandardErrorPath</key>
+	<string>__LOG_DIR__/memorylint-stderr.log</string>
+	<key>StandardOutPath</key>
+	<string>__LOG_DIR__/memorylint-stdout.log</string>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>22</integer>
+		<key>Minute</key>
+		<integer>0</integer>
+		<key>Weekday</key>
+		<integer>0</integer>
+	</dict>
+</dict>
+</plist>

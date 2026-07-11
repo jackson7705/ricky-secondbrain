@@ -110,6 +110,10 @@ CLICKUP_WORKSPACE_ID = os.getenv("CLICKUP_WORKSPACE_ID", "")
 # Optional: comma-separated ClickUp list IDs to monitor. If unset, integration
 # queries "all tasks assigned to me" across the workspace.
 CLICKUP_LIST_IDS = [s.strip() for s in os.getenv("CLICKUP_LIST_IDS", "").split(",") if s.strip()]
+# Owner's ClickUp user id (task assignee) + the "Inbox" list where autonomous
+# jobs (loose_ends, fathom_sweep) file captured to-dos. Per-owner — set in .env.
+CLICKUP_OWNER_UID = os.getenv("CLICKUP_OWNER_UID", "").strip()
+CLICKUP_INBOX_LIST_ID = os.getenv("CLICKUP_INBOX_LIST_ID", "").strip()
 
 # LinkedIn (aeo-authority-content publish path)
 LINKEDIN_CLIENT_ID = os.getenv("LINKEDIN_CLIENT_ID", "")
@@ -196,6 +200,21 @@ IMESSAGE_ALLOWED_ADDRESSES = [
     a.strip() for a in os.getenv("IMESSAGE_ALLOWED_ADDRESSES", "").split(",") if a.strip()
 ]
 IMESSAGE_STATE_PATH = DATA_DIR / "state" / "imessage-state.json"
+
+# === Owner identity (per-person — set these in .env when duplicating Ricky) ===
+# The owner's mobile number Ricky texts/reads on iMessage (digits only, incl.
+# country code, e.g. 16185582424). Autonomous jobs message this number.
+OWNER_PHONE = os.getenv("OWNER_PHONE", "").strip().lstrip("+")
+# BlueBubbles chat GUID for the owner's 1:1 thread. Defaults to the standard
+# "any;-;+<phone>" form; override OWNER_IMESSAGE_GUID directly for group chats.
+OWNER_IMESSAGE_GUID = os.getenv(
+    "OWNER_IMESSAGE_GUID", f"any;-;+{OWNER_PHONE}" if OWNER_PHONE else ""
+)
+# The owner's own email addresses (comma-separated) — used to recognize "their"
+# action items / self-assigned to-dos vs. other people's.
+OWNER_EMAILS = [e.strip().lower() for e in os.getenv("OWNER_EMAILS", "").split(",") if e.strip()]
+# Google Drive folder for briefings/deliverables Ricky produces.
+DRIVE_BRIEFINGS_FOLDER_ID = os.getenv("DRIVE_BRIEFINGS_FOLDER_ID", "").strip()
 
 # Calendar
 GOOGLE_CALENDAR_ID = os.getenv("GOOGLE_CALENDAR_ID", "")

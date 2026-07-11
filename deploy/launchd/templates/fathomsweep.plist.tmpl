@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>__LABEL_PREFIX__.fathomsweep</string>
+  <key>ProgramArguments</key><array>
+    <string>/bin/bash</string><string>-c</string>
+    <string>cd __PROJECT_DIR__/.claude/scripts; mkdir -p __LOG_DIR__; export PATH="$PATH:/opt/homebrew/bin:__HOME__/.local/bin"; exec uv run python fathom_sweep.py --apply &gt;&gt; __LOG_DIR__/fathomsweep.log 2&gt;&amp;1</string>
+  </array>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>30</integer></dict>
+  <key>StandardErrorPath</key><string>__LOG_DIR__/fathomsweep-stderr.log</string>
+</dict></plist>
