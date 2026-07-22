@@ -19,6 +19,16 @@ data/
 **/*.log
 **/*.lock
 
+# === Skill runtime state + staged business documents (NEVER commit) ===
+# Ricky's jobs write these live; they hold real invoices/vendor data/state.
+skills/*/state.json
+skills/*/pending-clarification.json
+skills/*/vendor-memory.json
+skills/invoice-router/staging/
+**/staging/
+# Stray user documents that land in skill dirs (real invoices/receipts/briefs).
+skills/**/*.pdf
+
 # === Python envs / caches ===
 .venv/
 venv/
