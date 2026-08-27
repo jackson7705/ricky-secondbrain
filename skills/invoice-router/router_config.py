@@ -28,6 +28,10 @@ MONTH_FOLDERS: dict[tuple[str, str], str] = {
     ("locafy", "2026-05"): "1wZSKsAuxwSWtqHn4wf4nyoyVvBghPVQX",
     ("locafy", "2026-06"): "1i10V4iAh913YH-Va38hqaJAEMu-HH4jL",
     ("locafy", "2026-07"): "1alUe9U4OYoi7Don2e52eX8bl2tRNVSDD",
+    # NB: this one is named "August" with NO trailing space, breaking the
+    # convention below. Pinned here so _ensure_month_folder never runs its
+    # exact-name search for "August " and creates a duplicate.
+    ("locafy", "2026-08"): "1jU7TtvBbX39wO4P1RAP-z5T5283xKjR0",
     ("wonderly", "2026-04"): "1GlMitPnkEW3fDl8OnpAlNK0WKKInUdwW",
     ("wonderly", "2026-05"): "1ttFmnKuXVTg2SQ4B7U0jzjX95a0H9y0I",
 }
@@ -47,6 +51,7 @@ SHEET_TAB_BY_MONTH: dict[str, str] = {
     "2026-05": "May",
     "2026-06": "June",
     "2026-07": "July",
+    "2026-08": "August",
 }
 
 # How the sheet wants rows structured (what goes in each column).
@@ -62,9 +67,14 @@ WONDERLY_SHEET_ID: str | None = "1itXSrN7CSjEXGM-ZC9XBhnxOaxY43weR-8pEbvFj7O8"
 
 # ── Scan parameters ─────────────────────────────────────────────────────
 
-# Which Google profiles to sweep. All three accounts get scanned so we don't
-# miss a receipt that landed in Locafy-only mail.
-SCAN_PROFILES = ["growthpro", "locafy", "wonderly"]
+# Which Google profiles to sweep. Both accounts get scanned so we don't miss a
+# receipt that landed in Locafy-only mail.
+#
+# "wonderly" was retired 2026-08-13: its Google account was deleted (refresh
+# fails with invalid_grant, which re-auth cannot fix) and its expense folders
+# have been idle since 2026-04-30. The wonderly folder IDs and routing branches
+# below are left intact — re-add the profile here if the business comes back.
+SCAN_PROFILES = ["growthpro", "locafy"]
 
 # Lookback window on first run (default). Subsequent runs use state.json
 # `last_scanned_at` to pick up where we left off.

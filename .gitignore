@@ -26,8 +26,14 @@ skills/*/pending-clarification.json
 skills/*/vendor-memory.json
 skills/invoice-router/staging/
 **/staging/
+# airsense-bills: the queue and the durable filed/preexisting ledger. Both hold
+# real invoice numbers, amounts and QBO vendor ids.
+skills/airsense-bills/pending-bills.json
+skills/airsense-bills/filed-ledger.json
 # Stray user documents that land in skill dirs (real invoices/receipts/briefs).
 skills/**/*.pdf
+# Scratch files written by `composio run --file`.
+**/.composio-run-*.ts
 
 # === Third-party course material (Skool ingest) — NEVER commit ===
 # Transcripts/notes are someone else's paid IP. Only Jason's own SOPs and

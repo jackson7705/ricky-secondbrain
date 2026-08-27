@@ -342,16 +342,35 @@ def _ensure_month_folder(business: str, month_key: str) -> str:
     display_name = month_name if month_name == "January" else f"{month_name} "
 
     service = get_drive_service()
-    # Look for an existing folder before creating
-    query = (
-        f"'{parent}' in parents and mimeType='application/vnd.google-apps.folder' "
-        f"and name='{display_name}' and trashed=false"
+    # Look for an existing folder before creating. Jason's folder names are
+    # inconsistent about a trailing space ("July " but "August"), so we list the
+    # parent and compare on a normalized name rather than querying an exact
+    # string — an exact match would miss the real folder and create a duplicate.
+    listed = with_retry(
+        lambda: service.files()
+        .list(
+            q=(
+                f"'{parent}' in parents and "
+                f"mimeType='application/vnd.google-apps.folder' and trashed=false"
+            ),
+            fields="files(id,name,createdTime)",
+            pageSize=200,
+        )
+        .execute()
     )
-    existing = with_retry(
-        lambda: service.files().list(q=query, fields="files(id,name)", pageSize=5).execute()
-    )
-    for f in existing.get("files", []):
-        return f["id"]
+    target = month_name.casefold()
+    matches = [f for f in listed.get("files", []) if f["name"].strip().casefold() == target]
+    if matches:
+        # Oldest wins — if duplicates already exist, the first one created is the
+        # one with the history in it. Surface the rest so they can be merged.
+        matches.sort(key=lambda f: f.get("createdTime", ""))
+        if len(matches) > 1:
+            dupes = ", ".join(f"{f['name']!r} ({f['id']})" for f in matches[1:])
+            print(
+                f"  [warn] {business}/{month_name}: {len(matches)} folders match — "
+                f"using oldest {matches[0]['id']}; duplicates: {dupes}"
+            )
+        return matches[0]["id"]
 
     # Create new
     body = {
@@ -364,6 +383,26 @@ def _ensure_month_folder(business: str, month_key: str) -> str:
     )
     print(f"  [info] created month folder {business}/{display_name!r} → {created['id']}")
     return created["id"]
+
+
+def _profile_error(profile: str, exc: Exception) -> str:
+    """Describe a per-profile failure, with a fix when the cause is known.
+
+    A revoked or deleted Google account fails the same way on every run, so say
+    what to do about it instead of reprinting the raw OAuth error each time.
+    """
+    msg = str(exc)
+    if "invalid_grant" not in msg:
+        return f"  [error] {profile}: {msg}"
+    if "deleted" in msg.lower():
+        return (
+            f"  [error] {profile}: Google account no longer exists — re-auth cannot fix this. "
+            f"Drop '{profile}' from SCAN_PROFILES in router_config.py, or point it at a live account."
+        )
+    return (
+        f"  [error] {profile}: Google token revoked or expired. Re-auth with "
+        f"`cd .claude/scripts && uv run python setup_auth.py --account {profile}`."
+    )
 
 
 def _download_attachment_or_body(candidate: Candidate, out_dir: Path) -> Path | None:
@@ -603,7 +642,7 @@ def run_scan(lookback_hours: int) -> int:
         try:
             candidates = _list_candidate_emails(profile, lookback_hours, vendor_memory)
         except Exception as e:
-            print(f"  [error] listing {profile}: {e}")
+            print(_profile_error(profile, e))
             continue
         print(f"  {len(candidates)} candidate emails")
 
@@ -721,7 +760,7 @@ def file_now(vendor: str, business: str, month_key: str, account: str | None = N
                 query=f'in:inbox (receipt OR invoice OR payment) {vendor}',
             )
         except Exception as e:
-            print(f"  [error] searching {profile}: {e}")
+            print(_profile_error(profile, e))
             continue
         cands = [
             e for e in emails
