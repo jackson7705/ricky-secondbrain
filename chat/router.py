@@ -17,8 +17,15 @@ class ChatRouter:
     its own task so multiple conversations can run simultaneously.
     """
 
-    def __init__(self, engine: ConversationEngine) -> None:
+    def __init__(
+        self,
+        engine: ConversationEngine,
+        progress_interval_seconds: float = 300,
+    ) -> None:
+        if progress_interval_seconds <= 0:
+            raise ValueError("progress interval must be positive")
         self.engine = engine
+        self.progress_interval_seconds = progress_interval_seconds
         self.adapters: dict[Platform, Any] = {}
 
     def register(self, adapter: Any) -> None:
@@ -77,11 +84,49 @@ class ChatRouter:
         # Collect the full response from the engine
         final_text = ""
         file_attachments: list[Any] = []
-        try:
+
+        async def collect_response() -> None:
+            nonlocal final_text, file_attachments
             async for outgoing in self.engine.handle_message(incoming):
                 final_text = outgoing.text
                 if outgoing.attachments:
                     file_attachments = outgoing.attachments
+
+        collector = asyncio.create_task(collect_response())
+        started_at = datetime.now()
+        try:
+            while not collector.done():
+                done, _ = await asyncio.wait(
+                    {collector},
+                    timeout=self.progress_interval_seconds,
+                )
+                if collector in done or not placeholder_id:
+                    continue
+                elapsed_minutes = max(
+                    1,
+                    int((datetime.now() - started_at).total_seconds() // 60),
+                )
+                try:
+                    await adapter.update(
+                        OutgoingMessage(
+                            text=(
+                                ":hourglass_flowing_sand: Still working — "
+                                f"{elapsed_minutes} minute(s) elapsed. Large tasks can "
+                                "take a while; I’ll post the finished result here."
+                            ),
+                            channel=incoming.channel,
+                            thread=incoming.thread,
+                            is_update=True,
+                            update_message_id=placeholder_id,
+                        )
+                    )
+                except Exception as e:
+                    print(f"[{datetime.now()}] Failed to send progress update: {e}")
+            await collector
+        except asyncio.CancelledError:
+            collector.cancel()
+            await asyncio.gather(collector, return_exceptions=True)
+            raise
         except Exception as e:
             print(f"[{datetime.now()}] Engine error: {e}")
             final_text = f"Sorry, something went wrong: {e}"

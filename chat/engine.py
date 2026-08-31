@@ -7,8 +7,10 @@ import os
 import re
 import sys
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
 from models import Attachment, IncomingMessage, OutgoingMessage
@@ -47,6 +49,60 @@ def _load_apify_mcp() -> dict:
     return {name: servers[name] for name in ("apify", "redis-iris") if servers.get(name)}
 
 
+# ── Task runtime profiles ────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class TaskRuntimePolicy:
+    """Watchdog limits for one agent request."""
+
+    name: str
+    inactivity_timeout_seconds: float
+    hard_ceiling_seconds: float
+
+    def __post_init__(self) -> None:
+        if self.inactivity_timeout_seconds <= 0:
+            raise ValueError("inactivity timeout must be positive")
+        if self.hard_ceiling_seconds <= 0:
+            raise ValueError("hard ceiling must be positive")
+        if self.hard_ceiling_seconds < self.inactivity_timeout_seconds:
+            raise ValueError("hard ceiling must be at least the inactivity timeout")
+
+
+_SLIDE_DECK_INTENT_RE = re.compile(
+    r"\b(?:slide\s+deck|deck|slides?|presentation|pptx|powerpoint|keynote)\b",
+    re.IGNORECASE,
+)
+
+_LARGE_TASK_INTENT_RE = re.compile(
+    r"\b(?:"
+    r"playbook|handbook|website|web\s+app|application|migration|"
+    r"full\s+audit|deep\s+research|"
+    r"comprehensive\s+(?:analysis|report|plan|strategy)|"
+    r"(?:big|large|long[- ]running|multi[- ]step|end[- ]to[- ]end)\s+"
+    r"(?:job|task|project|build|request)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _runtime_policy_for(
+    text: str,
+    normal_policy: TaskRuntimePolicy,
+    large_policy: TaskRuntimePolicy,
+) -> TaskRuntimePolicy:
+    """Select longer watchdog limits for known or explicitly large jobs."""
+    if _SLIDE_DECK_INTENT_RE.search(text) or _LARGE_TASK_INTENT_RE.search(text):
+        return large_policy
+    return normal_policy
+
+
+def _next_watchdog_timeout(policy: TaskRuntimePolicy, elapsed_seconds: float) -> float:
+    """Return the next wait duration without extending the absolute deadline."""
+    remaining = policy.hard_ceiling_seconds - elapsed_seconds
+    return max(0.0, min(policy.inactivity_timeout_seconds, remaining))
+
+
 # ── Deliverable directive injection ──────────────────────────────────────
 #
 # When the user's message looks like a request for a structured document,
@@ -60,7 +116,7 @@ _DELIVERABLE_INTENT_RE = re.compile(
     # Explicit deliverable nouns
     r"briefing|brief\s+on|brief\s+me|executive\s+brief|"
     r"report|write[- ]up|summary\s+document|"
-    r"pdf|one[- ]?pager|deck|slides|"
+    r"pdf|one[- ]?pager|"
     r"document(?:\s+me)?|give\s+me\s+a\s+doc|"
     # Structured-output requests
     r"roster|list\s+(?:of|what|the|all|every|every)|breakdown|mapping|map\s+out|"
@@ -98,6 +154,23 @@ _DELIVERABLE_DIRECTIVE = (
     "[END DIRECTIVE]\n\n"
 )
 
+_SLIDE_DECK_DIRECTIVE = (
+    "[SYSTEM DIRECTIVE FROM CHAT ENGINE — SLIDE DECK DELIVERY]\n"
+    "Your reply to this turn must be delivered as a branded PowerPoint-compatible "
+    "PPTX uploaded to Google Drive.\n"
+    "1. Use the `pptx-generator` skill and apply the Locafy brand (real logo, "
+    "teal #00A89D palette, and established typography). Do NOT convert the deck "
+    "into a generic PDF or use `locafy-documents`; the requested artifact is PPTX.\n"
+    "2. Follow the skill's batched generation and visual-validation workflow, then "
+    "combine all validated batches into ONE final deck.\n"
+    "3. Upload the final PPTX via `integrations.drive_api.upload_file(local_path, "
+    "'119jT4HsjLV9Dm-ib1UScX0TYPn2ANaW_')`, or the relevant business folder, and "
+    "make it `anyoneWithLink` reader.\n"
+    "4. Reply with a 1-3 sentence cover note ending with the Drive webViewLink. "
+    "Do not return part files or only a local path.\n"
+    "[END DIRECTIVE]\n\n"
+)
+
 
 def _maybe_prepend_deliverable_directive(text: str) -> str:
     """If the user message looks like a deliverable request, prepend the
@@ -105,6 +178,8 @@ def _maybe_prepend_deliverable_directive(text: str) -> str:
     in SOUL.md context that might be stale on resumed sessions."""
     if not text:
         return text
+    if _SLIDE_DECK_INTENT_RE.search(text):
+        return _SLIDE_DECK_DIRECTIVE + text
     # Cheap-ish keyword match — false positives are fine (worst case: a
     # short chat answer comes back as a 1-page PDF; recoverable).
     if _DELIVERABLE_INTENT_RE.search(text):
@@ -128,6 +203,10 @@ class ConversationEngine:
         rotate_after_days: int = 30,
         rotate_after_usd: float = 75.0,
         rotate_after_messages: int = 15,
+        inactivity_timeout_seconds: float = 600,
+        hard_ceiling_seconds: float = 1800,
+        large_task_inactivity_timeout_seconds: float = 3600,
+        large_task_hard_ceiling_seconds: float = 14400,
     ) -> None:
         self.session_store = session_store
         self.project_root = project_root
@@ -140,6 +219,16 @@ class ConversationEngine:
         self.rotate_after_days = rotate_after_days
         self.rotate_after_usd = rotate_after_usd
         self.rotate_after_messages = rotate_after_messages
+        self.normal_runtime_policy = TaskRuntimePolicy(
+            name="normal",
+            inactivity_timeout_seconds=inactivity_timeout_seconds,
+            hard_ceiling_seconds=hard_ceiling_seconds,
+        )
+        self.large_runtime_policy = TaskRuntimePolicy(
+            name="large",
+            inactivity_timeout_seconds=large_task_inactivity_timeout_seconds,
+            hard_ceiling_seconds=large_task_hard_ceiling_seconds,
+        )
 
     # Attachment extensions to detect in response text. Images delivered inline;
     # PDFs (and docs/sheets/slides) delivered as iMessage file attachments so
@@ -250,6 +339,19 @@ class ConversationEngine:
         thread_id = message.thread.thread_id if message.thread else message.channel.platform_id
         platform_str = message.platform.value
         channel_id = message.channel.platform_id
+
+        # Classify from the original user text. Injected directives contain
+        # deliverable keywords and must not influence runtime policy selection.
+        runtime_policy = _runtime_policy_for(
+            message.text,
+            self.normal_runtime_policy,
+            self.large_runtime_policy,
+        )
+        print(
+            f"[{datetime.now()}] Runtime profile={runtime_policy.name} "
+            f"(silence={runtime_policy.inactivity_timeout_seconds:.0f}s, "
+            f"ceiling={runtime_policy.hard_ceiling_seconds:.0f}s)"
+        )
 
         # Hard-inject the deliverable rule when the user's message looks like
         # a request for a document/briefing/structured content. Instruction-
@@ -416,9 +518,9 @@ class ConversationEngine:
         cost_usd: float | None = None
         first_yield = True
 
-        # Inactivity timeout. Resets on each SDK message. A true hang shows
-        # no traffic at all; legitimate long work (Drive uploads, doc gen,
-        # multi-tool research) keeps emitting messages and stays alive.
+        # Inactivity timeout. Resets on each SDK message. Large tasks receive a
+        # separate, longer policy because the SDK emits no events while one long
+        # render/generation/upload tool call is in flight.
         # 2026-06-03 origin: a 5-min wall-clock hang on a 1-line message cost
         # ~$2 in a tool loop. 2026-06-08: wall-clock was killing legit
         # 4-min+ doc workflows; switched to inactivity.
@@ -428,39 +530,48 @@ class ConversationEngine:
         # render, a large doc generation, multi-step Drive uploads) survives as
         # long as SOMETHING keeps arriving, while a genuine hang is caught at the
         # threshold rather than only retroactively when the next message lands.
-        # 2026-06-13: raised 180 -> 600 after a real enterprise-playbook build
-        # from iMessage aborted mid-build. Ricky is meant to FINISH heavy phone
-        # tasks; 3 min of silence is normal for one long render/generation.
-        INACTIVITY_TIMEOUT_SECONDS = 600   # 10 min of true silence = stuck
-        AGENT_HARD_CEILING_SECONDS = 1800  # 30 min absolute max, runaway guard
-        agent_started = datetime.now()
+        # The wait duration is capped by the remaining hard ceiling, so the
+        # absolute deadline is enforced even when no SDK message ever arrives.
+        agent_started = monotonic()
 
         try:
             _agen = query(prompt=message.text, options=options).__aiter__()
             while True:
+                elapsed_total = monotonic() - agent_started
+                hard_ceiling_is_next = (
+                    runtime_policy.hard_ceiling_seconds - elapsed_total
+                    <= runtime_policy.inactivity_timeout_seconds
+                )
+                wait_timeout = _next_watchdog_timeout(runtime_policy, elapsed_total)
+                if wait_timeout <= 0:
+                    raise TimeoutError(
+                        f"Agent took >{runtime_policy.hard_ceiling_seconds:.0f}s total — aborted."
+                    )
                 try:
                     sdk_message = await _asyncio.wait_for(
-                        _agen.__anext__(), timeout=INACTIVITY_TIMEOUT_SECONDS
+                        _agen.__anext__(), timeout=wait_timeout
                     )
                 except StopAsyncIteration:
                     break
-                except _asyncio.TimeoutError:
+                except TimeoutError:
+                    elapsed_total = monotonic() - agent_started
+                    if hard_ceiling_is_next:
+                        print(
+                            f"[{datetime.now()}] Agent SDK hard ceiling hit after "
+                            f"{elapsed_total:.0f}s — aborting runaway"
+                        )
+                        raise TimeoutError(
+                            f"Agent took >{runtime_policy.hard_ceiling_seconds:.0f}s "
+                            "total — aborted."
+                        )
                     print(
                         f"[{datetime.now()}] Agent SDK inactivity timeout after "
-                        f"{INACTIVITY_TIMEOUT_SECONDS}s of silence — aborting"
+                        f"{runtime_policy.inactivity_timeout_seconds:.0f}s of silence "
+                        f"(profile={runtime_policy.name}) — aborting"
                     )
                     raise TimeoutError(
-                        f"Agent went silent for >{INACTIVITY_TIMEOUT_SECONDS}s — aborted."
-                    )
-                now_ts = datetime.now()
-                elapsed_total = (now_ts - agent_started).total_seconds()
-                if elapsed_total > AGENT_HARD_CEILING_SECONDS:
-                    print(
-                        f"[{now_ts}] Agent SDK hard ceiling hit after "
-                        f"{elapsed_total:.0f}s — aborting runaway"
-                    )
-                    raise TimeoutError(
-                        f"Agent took >{AGENT_HARD_CEILING_SECONDS}s total — aborted."
+                        "Agent went silent for "
+                        f">{runtime_policy.inactivity_timeout_seconds:.0f}s — aborted."
                     )
                 if isinstance(sdk_message, AssistantMessage):
                     # Reset on each new AssistantMessage (keep only the latest turn)

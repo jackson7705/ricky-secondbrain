@@ -26,13 +26,18 @@ from router import ChatRouter  # noqa: E402
 from session import get_session_store  # noqa: E402
 
 from config import (  # noqa: E402
-    BLUEBUBBLES_POLL_INTERVAL,
     BLUEBUBBLES_PASSWORD,
+    BLUEBUBBLES_POLL_INTERVAL,
     BLUEBUBBLES_URL,
     CHAT_ALLOWED_USERS,
     CHAT_DB_PATH,
+    CHAT_HARD_CEILING_SECONDS,
+    CHAT_INACTIVITY_TIMEOUT_SECONDS,
+    CHAT_LARGE_TASK_HARD_CEILING_SECONDS,
+    CHAT_LARGE_TASK_INACTIVITY_TIMEOUT_SECONDS,
     CHAT_MAX_BUDGET_USD,
     CHAT_MAX_TURNS,
+    CHAT_PROGRESS_INTERVAL_SECONDS,
     DISCORD_ALLOWED_USER_IDS,
     DISCORD_BOT_TOKEN,
     IMESSAGE_ALLOWED_ADDRESSES,
@@ -61,7 +66,7 @@ def _telegram_configured() -> bool:
     return bool(TELEGRAM_BOT_TOKEN and TELEGRAM_ALLOWED_USER_IDS)
 
 
-def _build_adapters(router: "ChatRouter", store: Any, verbose: bool = False) -> int:
+def _build_adapters(router: ChatRouter, store: Any, verbose: bool = False) -> int:
     """Register every configured chat surface. Returns the count registered."""
     n = 0
     if _slack_configured():
@@ -128,6 +133,16 @@ def main() -> None:
     print(f"  Database:      {CHAT_DB_PATH}")
     print(f"  Max turns:     {CHAT_MAX_TURNS}")
     print(f"  Max budget:    ${CHAT_MAX_BUDGET_USD:.2f}")
+    print(
+        "  Normal limits: "
+        f"{CHAT_INACTIVITY_TIMEOUT_SECONDS:.0f}s silence / "
+        f"{CHAT_HARD_CEILING_SECONDS:.0f}s total"
+    )
+    print(
+        "  Large limits:  "
+        f"{CHAT_LARGE_TASK_INACTIVITY_TIMEOUT_SECONDS:.0f}s silence / "
+        f"{CHAT_LARGE_TASK_HARD_CEILING_SECONDS:.0f}s total"
+    )
     print(f"  Chat surfaces: {', '.join(surfaces)}")
     print(f"{'=' * 60}\n")
 
@@ -136,17 +151,35 @@ def main() -> None:
         store = get_session_store(CHAT_DB_PATH)
         active = store.list_active()
         print(f"  Session store OK ({len(active)} active sessions)")
-        engine = ConversationEngine(store, PROJECT_ROOT, CHAT_MAX_TURNS, CHAT_MAX_BUDGET_USD)
+        engine = ConversationEngine(
+            store,
+            PROJECT_ROOT,
+            CHAT_MAX_TURNS,
+            CHAT_MAX_BUDGET_USD,
+            inactivity_timeout_seconds=CHAT_INACTIVITY_TIMEOUT_SECONDS,
+            hard_ceiling_seconds=CHAT_HARD_CEILING_SECONDS,
+            large_task_inactivity_timeout_seconds=CHAT_LARGE_TASK_INACTIVITY_TIMEOUT_SECONDS,
+            large_task_hard_ceiling_seconds=CHAT_LARGE_TASK_HARD_CEILING_SECONDS,
+        )
         print("  Engine OK")
-        router = ChatRouter(engine)
+        router = ChatRouter(engine, progress_interval_seconds=CHAT_PROGRESS_INTERVAL_SECONDS)
         _build_adapters(router, store, verbose=True)
         print("\nAll checks passed. Run without --test to start.")
         return
 
     # Live mode
     store = get_session_store(CHAT_DB_PATH)
-    engine = ConversationEngine(store, PROJECT_ROOT, CHAT_MAX_TURNS, CHAT_MAX_BUDGET_USD)
-    router = ChatRouter(engine)
+    engine = ConversationEngine(
+        store,
+        PROJECT_ROOT,
+        CHAT_MAX_TURNS,
+        CHAT_MAX_BUDGET_USD,
+        inactivity_timeout_seconds=CHAT_INACTIVITY_TIMEOUT_SECONDS,
+        hard_ceiling_seconds=CHAT_HARD_CEILING_SECONDS,
+        large_task_inactivity_timeout_seconds=CHAT_LARGE_TASK_INACTIVITY_TIMEOUT_SECONDS,
+        large_task_hard_ceiling_seconds=CHAT_LARGE_TASK_HARD_CEILING_SECONDS,
+    )
+    router = ChatRouter(engine, progress_interval_seconds=CHAT_PROGRESS_INTERVAL_SECONDS)
     _build_adapters(router, store)
 
     print(f"[{datetime.now()}] Starting chat interface...")
