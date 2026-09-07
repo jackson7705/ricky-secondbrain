@@ -330,7 +330,11 @@ def _shift_timestamps(text: str, offset: int) -> str:
 
 def pick_source(lesson: dict[str, Any]) -> str | None:
     """Prefer hosts with free captions; fall back to whatever we found."""
-    urls: list[str] = [str(u) for u in (lesson.get("video_urls") or [])]
+    # Re-filter here as well: a manifest crawled by an older build can hold
+    # channel/profile links that are not single playable videos.
+    urls: list[str] = [
+        str(u) for u in (lesson.get("video_urls") or []) if crawl.is_video_url(str(u))
+    ]
     # stream.mux.com is the lesson's own signed video; anything else on the page
     # is a reference link the instructor happened to paste.
     for host in ("stream.mux.com", "youtube.com", "youtu.be", "loom.com", "vimeo.com", "wistia"):

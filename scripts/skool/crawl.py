@@ -54,9 +54,33 @@ def slugify(text: str, limit: int = 60) -> str:
     return (slug[:limit] or "untitled").strip("-")
 
 
+# A channel/profile/search link is not a lesson video — feeding one to yt-dlp
+# would try to pull the whole channel.
+NOT_A_VIDEO = re.compile(
+    r"youtube\.com/(channel|user|c/|@|results|playlist|feed)"
+    r"|vimeo\.com/(user|channels|groups)"
+    r"|loom\.com/(looms|spaces|home)",
+    re.I,
+)
+WATCHABLE = re.compile(
+    r"youtube\.com/(watch\?|embed/|shorts/|live/)"
+    r"|youtu\.be/[\w-]{6,}"
+    r"|vimeo\.com/\d+"
+    r"|player\.vimeo\.com/video/"
+    r"|loom\.com/(share|embed)/"
+    r"|stream\.mux\.com/"
+    r"|wistia\.(com|net)/(medias|embed)/",
+    re.I,
+)
+
+
 def is_video_url(url: str) -> bool:
-    low = url.lower().split("?")[0]
-    return any(h in url.lower() for h in VIDEO_HOSTS) or low.endswith(VIDEO_EXTS)
+    """True only for something yt-dlp can treat as one playable item."""
+    if NOT_A_VIDEO.search(url):
+        return False
+    if WATCHABLE.search(url):
+        return True
+    return url.lower().split("?")[0].endswith(VIDEO_EXTS)
 
 
 def urls_in(value: Any) -> list[str]:
