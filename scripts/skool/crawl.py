@@ -16,9 +16,12 @@ import json
 import re
 import time
 from collections.abc import Iterable
+from datetime import UTC, datetime
 from typing import Any
 
 from . import browser, settings
+
+LOCAL_TZ = UTC
 
 ID_RE = re.compile(
     r"^(?:[0-9a-f]{16,40}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$",
@@ -68,6 +71,55 @@ def urls_in(value: Any) -> list[str]:
         for v in value:
             found.extend(urls_in(v))
     return found
+
+
+SKOOL_REFERER = "https://www.skool.com/"
+
+
+def mux_url(video: dict[str, Any] | None) -> str | None:
+    """Skool hosts video on Mux; the page hands us a signed playback token.
+
+    The token is Referer-restricted (send SKOOL_REFERER) and expires in ~24h,
+    so transcribe soon after crawling or re-crawl to refresh.
+    """
+    if not isinstance(video, dict):
+        return None
+    playback_id = video.get("playbackId")
+    token = video.get("playbackToken")
+    if playback_id and token:
+        return f"https://stream.mux.com/{playback_id}.m3u8?token={token}"
+    return None
+
+
+def parse_rich_text(desc: str) -> str:
+    """Skool lesson bodies are '[v2]' + a JSON rich-text doc."""
+    if not desc:
+        return ""
+    raw = desc.strip()
+    if raw.startswith("[v2]"):
+        raw = raw[4:]
+    try:
+        doc = json.loads(raw)
+    except json.JSONDecodeError:
+        return desc
+    parts: list[str] = []
+
+    def visit(node: Any) -> None:
+        if isinstance(node, dict):
+            text = node.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+            url = node.get("url") or node.get("href")
+            if isinstance(url, str) and url.startswith("http"):
+                parts.append(f"<{url}>")
+            for value in node.values():
+                visit(value)
+        elif isinstance(node, list):
+            for value in node:
+                visit(value)
+
+    visit(doc)
+    return "\n".join(p for p in parts if p.strip())
 
 
 def _first(meta: dict[str, Any], keys: Iterable[str]) -> str:
@@ -137,95 +189,163 @@ def _dump_raw(group: str, name: str, payload: Any) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False)[:8_000_000], encoding="utf-8")
 
 
-def discover_courses(group: str) -> list[dict[str, str]]:
-    """Course cards on /<group>/classroom."""
+def discover_courses(group: str) -> list[dict[str, Any]]:
+    """Courses in /<group>/classroom, read from the page's own allCourses list."""
     browser.open_url(f"{settings.BASE_URL}/{group}/classroom")
-    props = browser.next_data()
+    props = browser.next_data() or {}
     if props:
         _dump_raw(group, "classroom", props)
-    courses: dict[str, dict[str, str]] = {}
 
+    courses: list[dict[str, Any]] = []
+    for entry in props.get("allCourses") or []:
+        if not isinstance(entry, dict):
+            continue
+        meta = entry.get("metadata") or {}
+        slug = entry.get("name") or ""
+        courses.append(
+            {
+                "id": entry.get("id", ""),
+                "slug": slug,
+                "title": meta.get("title") or slug,
+                "modules": meta.get("numModules"),
+                "has_access": bool(meta.get("hasAccess")),
+                "url": f"{settings.BASE_URL}/{group}/classroom/{slug}",
+            }
+        )
+
+    if courses:
+        return courses
+
+    # Fallback: older/other Skool layouts that render real course links.
+    seen: dict[str, dict[str, Any]] = {}
     for url in browser.media_urls():
-        match = re.search(rf"skool\.com/{re.escape(group)}/classroom/([0-9a-f]{{8,40}})", url)
+        pattern = rf"skool\.com/{re.escape(group)}/classroom/([0-9a-z]{{6,40}})"
+        match = re.search(pattern, url, re.I)
         if match:
             cid = match.group(1)
-            courses.setdefault(cid, {"id": cid, "title": "", "url": url.split("?")[0]})
+            seen.setdefault(
+                cid,
+                {
+                    "id": cid,
+                    "slug": cid,
+                    "title": cid,
+                    "has_access": True,
+                    "url": url.split("?")[0],
+                },
+            )
+    for node in harvest_nodes(props):
+        if node["id"] in seen and node["title"]:
+            seen[node["id"]]["title"] = node["title"]
+    return list(seen.values())
 
-    for node in harvest_nodes(props or {}):
-        cid = node["id"]
-        if cid in courses and node["title"]:
-            courses[cid]["title"] = node["title"]
 
-    return list(courses.values())
+def walk_tree(
+    node: Any, section: str = "", out: list[dict[str, Any]] | None = None
+) -> list[dict[str, Any]]:
+    """Flatten Skool's {course, children} tree into an ordered lesson list.
+
+    unitType 'set' is a module/section header; unitType 'module' is a lesson.
+    """
+    lessons = [] if out is None else out
+    if not isinstance(node, dict):
+        return lessons
+    raw_unit = node.get("course")
+    unit: dict[str, Any] = raw_unit if isinstance(raw_unit, dict) else {}
+    raw_meta = unit.get("metadata")
+    meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
+    title = meta.get("title") or unit.get("name") or ""
+    kind = unit.get("unitType")
+
+    child_section = section
+    if kind == "set":
+        child_section = title
+    elif kind == "module":
+        lessons.append(
+            {
+                "id": unit.get("id", ""),
+                "title": title,
+                "section": section,
+                "video_id": meta.get("videoId"),
+                "has_access": bool(meta.get("hasAccess", 1)),
+                "body": parse_rich_text(meta.get("desc") or ""),
+            }
+        )
+
+    for child in node.get("children") or []:
+        walk_tree(child, child_section, lessons)
+    return lessons
 
 
 def crawl_course(
-    group: str, course: dict[str, str], *, max_lessons: int | None = None
+    group: str, course: dict[str, Any], *, max_lessons: int | None = None
 ) -> dict[str, Any]:
-    """Open a course, enumerate its lessons, capture text + video sources."""
-    course_url = course.get("url") or f"{settings.BASE_URL}/{group}/classroom/{course['id']}"
-    browser.open_url(course_url)
+    """Open a course, flatten its tree, then visit each lesson for video + text."""
+    browser.open_url(course["url"])
     props = browser.next_data() or {}
-    _dump_raw(group, f"course-{course['id']}", props)
+    _dump_raw(group, f"course-{course['slug'] or course['id']}", props)
 
-    nodes = harvest_nodes(props)
-    title_by_id = {n["id"]: n["title"] for n in nodes if n["title"]}
-    course["title"] = course.get("title") or title_by_id.get(course["id"], "") or course["id"]
-
-    # Lesson candidates: every node that isn't the course itself, in page order.
-    lesson_ids = [n["id"] for n in nodes if n["id"] != course["id"]]
-    for url in browser.media_urls():
-        match = re.search(r"[?&]md=([0-9a-f]{8,40})", url)
-        if match and match.group(1) not in lesson_ids:
-            lesson_ids.append(match.group(1))
+    found = walk_tree(props.get("course") or {})
+    if not found:  # shape drift — fall back to the generic harvester
+        found = [
+            {
+                "id": n["id"],
+                "title": n["title"],
+                "section": "",
+                "video_id": None,
+                "has_access": True,
+                "body": n["body"],
+            }
+            for n in harvest_nodes(props)
+            if n["id"] != course["id"]
+        ]
     if max_lessons:
-        lesson_ids = lesson_ids[:max_lessons]
+        found = found[:max_lessons]
 
-    node_by_id = {n["id"]: n for n in nodes}
     lessons: list[dict[str, Any]] = []
-    for index, lesson_id in enumerate(lesson_ids, start=1):
-        node = node_by_id.get(
-            lesson_id, {"id": lesson_id, "title": "", "body": "", "video_urls": []}
-        )
+    for index, node in enumerate(found, start=1):
         lesson = _capture_lesson(group, course, node, index)
         if lesson:
             lessons.append(lesson)
         time.sleep(settings.POLITE_DELAY_S)
 
-    course["lessons"] = lessons  # type: ignore[assignment]
+    course["lessons"] = lessons
     return course
 
 
 def _capture_lesson(
-    group: str, course: dict[str, str], node: dict[str, Any], index: int
+    group: str, course: dict[str, Any], node: dict[str, Any], index: int
 ) -> dict[str, Any] | None:
-    lesson_url = f"{settings.BASE_URL}/{group}/classroom/{course['id']}?md={node['id']}"
+    lesson_url = f"{course['url']}?md={node['id']}"
     try:
         browser.open_url(lesson_url)
-        text = browser.read_text()
-        page_urls = browser.media_urls()
         props = browser.next_data() or {}
+        text = browser.read_text()
     except browser.BrowserError as exc:
-        print(f"  ! lesson {node['id']}: {exc}")
+        print(f"  ! lesson {node['id'][:10]}: {exc}")
         return None
 
-    page_nodes = harvest_nodes(props)
-    this_node = next((n for n in page_nodes if n["id"] == node["id"]), None) or node
-    title = this_node.get("title") or node.get("title") or f"lesson-{index}"
+    # The open lesson carries its own full metadata + signed video token.
+    live: dict[str, Any] = next(
+        (x for x in walk_tree(props.get("course") or {}) if x["id"] == node["id"]), node
+    )
+    title = live.get("title") or node["title"] or f"lesson-{index}"
+    body = live.get("body") or node.get("body") or ""
 
-    videos = set(node.get("video_urls") or [])
-    videos.update(this_node.get("video_urls") or [])
-    videos.update(u for u in page_urls if is_video_url(u))
-    videos.update(u for u in urls_in(props) if is_video_url(u))
+    videos: list[str] = []
+    signed = mux_url(props.get("video"))
+    if signed:
+        videos.append(signed)
+    videos.extend(u for u in browser.media_urls() if is_video_url(u))
+    videos.extend(u for u in urls_in(props) if is_video_url(u))
 
     slug = f"{index:03d}-{slugify(title)}"
-    body = this_node.get("body") or node.get("body") or ""
     md_path = settings.group_dir(group) / "lessons" / f"{slug}.md"
     md_path.write_text(
         "\n".join(
             [
                 "---",
-                f"course: {course.get('title') or course['id']}",
+                f"course: {course.get('title')}",
+                f"section: {node.get('section', '')}",
                 f"lesson: {title}",
                 f"lesson_id: {node['id']}",
                 f"url: {lesson_url}",
@@ -243,15 +363,18 @@ def _capture_lesson(
         encoding="utf-8",
     )
 
-    print(f"  · {slug}  ({len(videos)} video source{'s' if len(videos) != 1 else ''})")
+    marker = "video" if signed else ("link" if videos else "text-only")
+    print(f"  · {index:>3}. {title[:52]:<54} [{marker}]")
     return {
         "index": index,
         "id": node["id"],
         "title": title,
+        "section": node.get("section", ""),
         "slug": slug,
         "url": lesson_url,
         "markdown": str(md_path.relative_to(settings.group_dir(group))),
-        "video_urls": sorted(videos),
+        "video_urls": list(dict.fromkeys(videos)),
+        "needs_referer": bool(signed),
     }
 
 
@@ -260,7 +383,11 @@ def crawl(
 ) -> dict[str, Any]:
     root = settings.ensure_dirs(group)
     manifest_path = root / "manifest.json"
-    manifest: dict[str, Any] = {"group": group, "courses": []}
+    manifest: dict[str, Any] = {
+        "group": group,
+        "crawled_at": datetime.now(LOCAL_TZ).isoformat(timespec="seconds"),
+        "courses": [],
+    }
 
     def save() -> None:
         manifest_path.write_text(
@@ -280,7 +407,11 @@ def crawl(
         )
 
     for course in courses:
-        print(f"\n▸ {course.get('title') or course['id']}")
+        if not course.get("has_access", True):
+            print(f"\n▸ {course.get('title')} — LOCKED (needs a higher level), skipping")
+            continue
+        modules = course.get("modules")
+        print(f"\n▸ {course.get('title')}" + (f"  ({modules} modules)" if modules else ""))
         crawled = crawl_course(group, course, max_lessons=max_lessons)
         manifest["courses"].append(crawled)
         save()

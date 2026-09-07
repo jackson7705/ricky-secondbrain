@@ -35,6 +35,10 @@ def describe(me: dict[str, Any] | None) -> str:
 def login(wait_seconds: int = 420) -> bool:
     """Open a visible browser and wait for a human to finish signing in."""
     settings.PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    # --headed only takes effect at launch, so a headless daemon left over from
+    # an earlier crawl would silently swallow the login window. Kill it first.
+    browser.close()
+    time.sleep(2)
     print("Opening a browser window on skool.com/login ...")
     browser.open_url(settings.BASE_URL + "/login", headed=True, wait_ms=3000)
     print(

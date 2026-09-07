@@ -55,10 +55,15 @@ def ytdlp_cmd() -> list[str]:
     raise TranscribeError("yt-dlp not available (install uv or `brew install yt-dlp`)")
 
 
-def _ytdlp(args: list[str], *, timeout: int = 1800) -> subprocess.CompletedProcess[str]:
-    cmd = ytdlp_cmd() + ["--no-playlist", "--no-warnings", "--ignore-config"]
+def _ytdlp(
+    args: list[str], *, url: str = "", timeout: int = 1800
+) -> subprocess.CompletedProcess[str]:
+    cmd = ytdlp_cmd() + ["--no-playlist", "--no-warnings", "--no-progress", "--ignore-config"]
     if settings.COOKIES_FILE.exists():
         cmd += ["--cookies", str(settings.COOKIES_FILE)]
+    if "stream.mux.com" in url:
+        # Skool's Mux tokens are Referer-restricted; without this every fetch 403s.
+        cmd += ["--referer", crawl.SKOOL_REFERER]
     return subprocess.run(cmd + args, capture_output=True, text=True, timeout=timeout)
 
 
@@ -123,7 +128,8 @@ def try_captions(url: str, workdir: Path, slug: str) -> str | None:
             str(out) + ".%(ext)s",
             url,
         ],
-        timeout=300,
+        url=url,
+        timeout=600,
     )
     vtts = sorted(workdir.glob(f"{slug}*.vtt"))
     if not vtts:
@@ -145,10 +151,16 @@ def download_audio(url: str, workdir: Path, slug: str) -> Path | None:
     existing = sorted(workdir.glob(f"{slug}.src.*"))
     if existing:
         return existing[0]
-    proc = _ytdlp(["-f", "bestaudio/best", "-o", str(target) + ".%(ext)s", url])
+    proc = _ytdlp(
+        ["-f", "bestaudio/best", "-o", str(target) + ".%(ext)s", url], url=url
+    )
     files = sorted(workdir.glob(f"{slug}.src.*"))
     if not files:
-        tail = (proc.stderr or proc.stdout).strip().splitlines()
+        blob = (proc.stderr or proc.stdout).strip()
+        if "403" in blob or "Forbidden" in blob:
+            print("    ! 403 — Mux playback token expired (they last ~24h). Re-run crawl.")
+            return None
+        tail = blob.splitlines()
         print(f"    ! download failed: {tail[-1][:160] if tail else 'unknown error'}")
         return None
     return files[0]
@@ -221,13 +233,25 @@ def _post_json(url: str, body: bytes) -> tuple[int, bytes]:
             out = Path(tmp) / "resp.json"
             proc = subprocess.run(
                 [
-                    curl, "-sS", "-X", "POST", url,
-                    "-H", "Content-Type: application/json",
-                    "--data-binary", f"@{payload}",
-                    "-o", str(out), "-w", "%{http_code}",
-                    "--max-time", "900",
+                    curl,
+                    "-sS",
+                    "-X",
+                    "POST",
+                    url,
+                    "-H",
+                    "Content-Type: application/json",
+                    "--data-binary",
+                    f"@{payload}",
+                    "-o",
+                    str(out),
+                    "-w",
+                    "%{http_code}",
+                    "--max-time",
+                    "900",
                 ],
-                capture_output=True, text=True, timeout=960,
+                capture_output=True,
+                text=True,
+                timeout=960,
             )
             if proc.returncode != 0:
                 raise TranscribeError(f"curl failed: {proc.stderr.strip()[:200]}")
@@ -307,7 +331,9 @@ def _shift_timestamps(text: str, offset: int) -> str:
 def pick_source(lesson: dict[str, Any]) -> str | None:
     """Prefer hosts with free captions; fall back to whatever we found."""
     urls: list[str] = [str(u) for u in (lesson.get("video_urls") or [])]
-    for host in ("youtube.com", "youtu.be", "loom.com", "vimeo.com", "wistia"):
+    # stream.mux.com is the lesson's own signed video; anything else on the page
+    # is a reference link the instructor happened to paste.
+    for host in ("stream.mux.com", "youtube.com", "youtu.be", "loom.com", "vimeo.com", "wistia"):
         for url in urls:
             if host in url.lower():
                 return url
