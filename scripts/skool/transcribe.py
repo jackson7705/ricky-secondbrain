@@ -91,26 +91,67 @@ def _ffprobe_duration(path: Path) -> float:
 # --------------------------------------------------------------------------- captions
 
 
-def _vtt_to_text(path: Path) -> str:
-    lines: list[str] = []
-    stamp = ""
-    last = ""
+def _stamp(seconds: float) -> str:
+    total = int(seconds)
+    return f"[{total // 3600:02d}:{total % 3600 // 60:02d}:{total % 60:02d}]"
+
+
+def _parse_vtt(path: Path) -> list[tuple[float, str]]:
+    """Return [(start_seconds, text)] cues from a WebVTT file."""
+    cues: list[tuple[float, str]] = []
+    start: float | None = None
+    buffer: list[str] = []
+
+    def flush() -> None:
+        if start is not None and buffer:
+            cues.append((start, " ".join(buffer).strip()))
+
     for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
         line = raw.strip()
-        if not line or line in {"WEBVTT"} or line.startswith(("Kind:", "Language:", "NOTE")):
+        if not line:
+            flush()
+            start, buffer = None, []
+            continue
+        if line == "WEBVTT" or line.startswith(("Kind:", "Language:", "NOTE", "STYLE", "REGION")):
             continue
         if "-->" in line:
-            start = line.split("-->")[0].strip().split(".")[0]
-            parts = start.split(":")
-            stamp = f"[{parts[0]}:{parts[1]}:{parts[2]}]" if len(parts) == 3 else f"[{start}]"
+            flush()
+            buffer = []
+            stamp = line.split("-->")[0].strip().split(".")[0]
+            bits = [float(x) for x in stamp.split(":")]
+            while len(bits) < 3:
+                bits.insert(0, 0.0)
+            start = bits[0] * 3600 + bits[1] * 60 + bits[2]
             continue
+        if start is None and line.isdigit():
+            continue  # cue index
         text = re.sub(r"<[^>]+>", "", line).strip()
-        if not text or text == last:
+        if text:
+            buffer.append(text)
+    flush()
+    return cues
+
+
+def _vtt_to_text(path: Path, *, stamp_every: int = 30) -> str:
+    """Readable transcript: timestamped paragraphs, no cue numbers, no repeats."""
+    paragraphs: list[str] = []
+    words: list[str] = []
+    para_start = 0.0
+    last = ""
+
+    for start, text in _parse_vtt(path):
+        if text == last:  # rolling captions repeat the previous cue
             continue
         last = text
-        lines.append(f"{stamp} {text}" if stamp and (len(lines) % 8 == 0) else text)
-        stamp = ""
-    return "\n".join(lines)
+        if not words:
+            para_start = start
+        words.append(text)
+        if start - para_start >= stamp_every:
+            paragraphs.append(f"{_stamp(para_start)} {' '.join(words)}")
+            words = []
+    if words:
+        paragraphs.append(f"{_stamp(para_start)} {' '.join(words)}")
+    return "\n\n".join(paragraphs)
 
 
 def try_captions(url: str, workdir: Path, slug: str) -> str | None:
@@ -151,9 +192,7 @@ def download_audio(url: str, workdir: Path, slug: str) -> Path | None:
     existing = sorted(workdir.glob(f"{slug}.src.*"))
     if existing:
         return existing[0]
-    proc = _ytdlp(
-        ["-f", "bestaudio/best", "-o", str(target) + ".%(ext)s", url], url=url
-    )
+    proc = _ytdlp(["-f", "bestaudio/best", "-o", str(target) + ".%(ext)s", url], url=url)
     files = sorted(workdir.glob(f"{slug}.src.*"))
     if not files:
         blob = (proc.stderr or proc.stdout).strip()
