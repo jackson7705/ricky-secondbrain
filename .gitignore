@@ -29,6 +29,14 @@ skills/invoice-router/staging/
 # Stray user documents that land in skill dirs (real invoices/receipts/briefs).
 skills/**/*.pdf
 
+# === Third-party course material (Skool ingest) — NEVER commit ===
+# Transcripts/notes are someone else's paid IP. Only Jason's own SOPs and
+# skills, written from them, belong in git.
+deliverables/skool/
+**/skool/audio/
+**/skool/transcripts/
+**/skool/raw/
+
 # === Python envs / caches ===
 .venv/
 venv/
