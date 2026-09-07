@@ -63,7 +63,12 @@ def cmd_groups(_: argparse.Namespace) -> int:
 
 
 def cmd_crawl(args: argparse.Namespace) -> int:
-    crawl.crawl(args.group, max_courses=args.max_courses, max_lessons=args.max_lessons)
+    crawl.crawl(
+        args.group,
+        max_courses=args.max_courses,
+        max_lessons=args.max_lessons,
+        course_filter=args.course,
+    )
     return 0
 
 
@@ -73,7 +78,12 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
-    crawl.crawl(args.group, max_courses=args.max_courses, max_lessons=args.max_lessons)
+    crawl.crawl(
+        args.group,
+        max_courses=args.max_courses,
+        max_lessons=args.max_lessons,
+        course_filter=args.course,
+    )
     transcribe.transcribe_group(args.group, course_filter=args.course, limit=args.limit)
     return cmd_index(args)
 
@@ -157,6 +167,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p_crawl = sub.add_parser("crawl", help="map classroom → manifest.json")
     add_group(p_crawl)
+    p_crawl.add_argument("--course", default="", help="only courses whose title contains this")
     p_crawl.add_argument("--max-courses", type=int, default=None)
     p_crawl.add_argument("--max-lessons", type=int, default=None)
     p_crawl.set_defaults(func=cmd_crawl)

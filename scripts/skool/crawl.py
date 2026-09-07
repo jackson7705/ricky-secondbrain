@@ -388,7 +388,8 @@ def _capture_lesson(
 
     resources = _parse_resources(live.get("resources") or node.get("resources") or "")
 
-    slug = f"{index:03d}-{slugify(title)}"
+    # Course-prefixed: three courses each have a "Start Here" lesson 001.
+    slug = f"{slugify(course.get('title') or course['id'], 40)}--{index:03d}-{slugify(title)}"
     md_path = settings.group_dir(group) / "lessons" / f"{slug}.md"
     md_path.write_text(
         "\n".join(
@@ -437,10 +438,22 @@ def _capture_lesson(
 
 
 def crawl(
-    group: str, *, max_courses: int | None = None, max_lessons: int | None = None
+    group: str,
+    *,
+    max_courses: int | None = None,
+    max_lessons: int | None = None,
+    course_filter: str = "",
 ) -> dict[str, Any]:
     root = settings.ensure_dirs(group)
     manifest_path = root / "manifest.json"
+    # A filtered crawl refreshes those courses inside the existing manifest
+    # instead of throwing the rest away.
+    previous: list[dict[str, Any]] = []
+    if course_filter and manifest_path.exists():
+        try:
+            previous = json.loads(manifest_path.read_text(encoding="utf-8")).get("courses", [])
+        except json.JSONDecodeError:
+            previous = []
     manifest: dict[str, Any] = {
         "group": group,
         "crawled_at": datetime.now(LOCAL_TZ).isoformat(timespec="seconds"),
@@ -448,12 +461,19 @@ def crawl(
     }
 
     def save() -> None:
+        if previous:
+            done = {c.get("id") for c in manifest["courses"]}
+            manifest["courses"] = manifest["courses"] + [
+                c for c in previous if c.get("id") not in done
+            ]
         manifest_path.write_text(
             json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
         )
 
     print(f"Discovering courses in /{group}/classroom ...")
     courses = discover_courses(group)
+    if course_filter:
+        courses = [c for c in courses if course_filter.lower() in (c.get("title") or "").lower()]
     if max_courses:
         courses = courses[:max_courses]
     print(f"Found {len(courses)} course(s).")
