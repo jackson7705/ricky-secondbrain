@@ -146,6 +146,25 @@ def parse_rich_text(desc: str) -> str:
     return "\n".join(p for p in parts if p.strip())
 
 
+def _parse_resources(raw: str) -> list[str]:
+    """Lesson attachments/links, stored as a JSON string."""
+    if not raw or raw == "[]":
+        return []
+    try:
+        items = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    out: list[str] = []
+    for item in items if isinstance(items, list) else []:
+        if isinstance(item, dict):
+            label = item.get("label") or item.get("title") or ""
+            url = item.get("url") or item.get("link") or ""
+            out.append(f"{label} — {url}".strip(" —") if label or url else "")
+        elif isinstance(item, str):
+            out.append(item)
+    return [x for x in out if x]
+
+
 def _first(meta: dict[str, Any], keys: Iterable[str]) -> str:
     for key in keys:
         val = meta.get(key)
@@ -292,6 +311,7 @@ def walk_tree(
                 "video_id": meta.get("videoId"),
                 "has_access": bool(meta.get("hasAccess", 1)),
                 "body": parse_rich_text(meta.get("desc") or ""),
+                "resources": meta.get("resources") or "",
             }
         )
 
@@ -355,12 +375,18 @@ def _capture_lesson(
     title = live.get("title") or node["title"] or f"lesson-{index}"
     body = live.get("body") or node.get("body") or ""
 
+    # Only ever trust the lesson's OWN video: the signed Mux player, or a video
+    # link inside its own body. Page-wide anchors are community chrome (a
+    # sidebar YouTube channel link, a pinned promo) and would make every empty
+    # lesson transcribe the same wrong video.
     videos: list[str] = []
     signed = mux_url(props.get("video"))
     if signed:
         videos.append(signed)
-    videos.extend(u for u in browser.media_urls() if is_video_url(u))
-    videos.extend(u for u in urls_in(props) if is_video_url(u))
+    else:
+        videos.extend(u for u in URL_RE.findall(body) if is_video_url(u))
+
+    resources = _parse_resources(live.get("resources") or node.get("resources") or "")
 
     slug = f"{index:03d}-{slugify(title)}"
     md_path = settings.group_dir(group) / "lessons" / f"{slug}.md"
@@ -379,6 +405,7 @@ def _capture_lesson(
                 "",
                 body,
                 "",
+                *(["## Resources", "", *[f"- {r}" for r in resources], ""] if resources else []),
                 "## Page text",
                 "",
                 text,
@@ -387,7 +414,12 @@ def _capture_lesson(
         encoding="utf-8",
     )
 
-    marker = "video" if signed else ("link" if videos else "text-only")
+    if signed:
+        marker = "video"
+    elif videos:
+        marker = "video-link"
+    else:
+        marker = "text" if body.strip() else "EMPTY"
     print(f"  · {index:>3}. {title[:52]:<54} [{marker}]")
     return {
         "index": index,
@@ -399,6 +431,8 @@ def _capture_lesson(
         "markdown": str(md_path.relative_to(settings.group_dir(group))),
         "video_urls": list(dict.fromkeys(videos)),
         "needs_referer": bool(signed),
+        "resources": resources,
+        "kind": "video" if videos else ("text" if body.strip() else "empty"),
     }
 
 
