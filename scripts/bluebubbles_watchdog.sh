@@ -30,7 +30,17 @@ log() {
 
 # Probe: any HTTP response (even 401/403) means the server is binding
 # the port and processing requests. Connection refused / timeout = down.
-http_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time "$PROBE_TIMEOUT" "$PROBE_URL" 2>/dev/null || echo "000")
+#
+# NOTE: no `|| echo "000"` here. curl already prints "000" on a connection
+# failure AND exits non-zero, so the fallback used to append a second one —
+# yielding "000000", which passes both tests below (it is != "000", and it is
+# numerically 0, so < 500). The watchdog therefore read every outage as
+# healthy and never restarted anything in ~50k runs. Substitute a default
+# only when curl printed nothing at all.
+http_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time "$PROBE_TIMEOUT" "$PROBE_URL" 2>/dev/null)
+http_code="${http_code:-000}"
+# Anything non-numeric is treated as down rather than trusted.
+[[ "$http_code" =~ ^[0-9]+$ ]] || http_code="000"
 
 if [[ "$http_code" != "000" && "$http_code" -lt 500 ]]; then
   # Server is responding — clear any pending down-state.
