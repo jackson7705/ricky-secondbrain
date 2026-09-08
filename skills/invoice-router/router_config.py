@@ -32,6 +32,7 @@ MONTH_FOLDERS: dict[tuple[str, str], str] = {
     # convention below. Pinned here so _ensure_month_folder never runs its
     # exact-name search for "August " and creates a duplicate.
     ("locafy", "2026-08"): "1jU7TtvBbX39wO4P1RAP-z5T5283xKjR0",
+    ("locafy", "2026-09"): "1DAZQ2qm_Q2-YjSkYZkLEkzRd37Rpkx0r",
     ("wonderly", "2026-04"): "1GlMitPnkEW3fDl8OnpAlNK0WKKInUdwW",
     ("wonderly", "2026-05"): "1ttFmnKuXVTg2SQ4B7U0jzjX95a0H9y0I",
 }
@@ -52,6 +53,7 @@ SHEET_TAB_BY_MONTH: dict[str, str] = {
     "2026-06": "June",
     "2026-07": "July",
     "2026-08": "August",
+    "2026-09": "September",
 }
 
 # How the sheet wants rows structured (what goes in each column).
