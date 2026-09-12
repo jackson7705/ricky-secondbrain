@@ -21,6 +21,19 @@ unreachable from Slack/iMessage and only usable inside a Claude Code session.
 | finance | 5 | Financial Analyst, Bookkeeper & Controller |
 | engineering | 5 | Backend Engineer, Frontend Engineer, Code Reviewer, Test Engineer, Debugger |
 
+## Models
+
+A subagent inherits the parent turn's model unless its frontmatter pins one, so
+a Fable 5.1 code turn that fans out to five specialists runs all five at Fable
+rates. Pinning works with full model IDs — verified 2026-09-12: parent on
+`claude-fable-5-1` ($0.92), subagent on `claude-sonnet-5` ($0.11), same turn.
+
+Two of the engineering agents are pinned to `claude-sonnet-5` because their work
+is the most mechanical: **Test Engineer** and **Frontend Engineer**. Backend
+Engineer, Code Reviewer, and Debugger inherit deliberately — they run at
+whatever tier the turn is worth, and root-causing is where the capability
+actually pays. Delete the `model:` line to put one back on inherit.
+
 ## How Ricky uses them
 
 Ricky dispatches a specialist when a task matches its expertise (e.g. an SEO

@@ -86,6 +86,23 @@ _LARGE_TASK_INTENT_RE = re.compile(
 )
 
 
+# Work that earns the expensive model. Deliberately narrower than the runtime
+# policy above: model choice and watchdog timeouts are separate concerns — a
+# slide deck needs a long silence window but not Fable's reasoning, while a
+# one-line bug fix needs the reasoning and finishes in a minute.
+_HEAVY_MODEL_INTENT_RE = re.compile(
+    r"\b(?:"
+    r"debug|refactor|implement|"
+    r"pull\s+request|"
+    r"(?:fix|trace|diagnose|root[- ]cause)\s+(?:the\s+|this\s+|a\s+)?"
+    r"(?:bug|crash|error|failure|regression|test)|"
+    r"(?:write|build|ship|patch)\s+(?:the\s+|a\s+|some\s+)?"
+    r"(?:code|script|feature|function|module|fix|test|tests)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
 def _runtime_policy_for(
     text: str,
     normal_policy: TaskRuntimePolicy,
@@ -95,6 +112,13 @@ def _runtime_policy_for(
     if _SLIDE_DECK_INTENT_RE.search(text) or _LARGE_TASK_INTENT_RE.search(text):
         return large_policy
     return normal_policy
+
+
+def _model_for(text: str, default_model: str, heavy_model: str) -> str:
+    """Pick the model for this turn — heavy only for code-shaped asks."""
+    if heavy_model and _HEAVY_MODEL_INTENT_RE.search(text):
+        return heavy_model
+    return default_model
 
 
 def _next_watchdog_timeout(policy: TaskRuntimePolicy, elapsed_seconds: float) -> float:
@@ -207,11 +231,20 @@ class ConversationEngine:
         hard_ceiling_seconds: float = 1800,
         large_task_inactivity_timeout_seconds: float = 3600,
         large_task_hard_ceiling_seconds: float = 14400,
+        cli_path: str = "",
+        model: str = "claude-opus-5",
+        heavy_model: str = "",
     ) -> None:
         self.session_store = session_store
         self.project_root = project_root
         self.max_turns = max_turns
         self.max_budget_usd = max_budget_usd
+        # Which `claude` binary the SDK drives. Empty = let the SDK pick, which
+        # means its bundled 2.1.114 build and no access to the Claude 5 models.
+        # See config.CHAT_CLI_PATH.
+        self.cli_path = cli_path
+        self.model = model
+        self.heavy_model = heavy_model
         # Rotate the underlying Agent SDK session when it gets stale. Keeps
         # cumulative cost bounded (so we don't drift back into the $100 budget
         # cap) and keeps the in-context history short (faster + cheaper turns).
@@ -347,10 +380,12 @@ class ConversationEngine:
             self.normal_runtime_policy,
             self.large_runtime_policy,
         )
+        turn_model = _model_for(message.text, self.model, self.heavy_model)
         print(
             f"[{datetime.now()}] Runtime profile={runtime_policy.name} "
             f"(silence={runtime_policy.inactivity_timeout_seconds:.0f}s, "
-            f"ceiling={runtime_policy.hard_ceiling_seconds:.0f}s)"
+            f"ceiling={runtime_policy.hard_ceiling_seconds:.0f}s) "
+            f"model={turn_model}"
         )
 
         # Hard-inject the deliverable rule when the user's message looks like
@@ -384,6 +419,7 @@ class ConversationEngine:
         # Build Agent SDK options
         options_kwargs: dict[str, Any] = {
             "cwd": str(self.project_root),
+            "model": turn_model,
             "setting_sources": ["user", "project"],
             "system_prompt": {
                 "type": "preset",
@@ -488,6 +524,9 @@ class ConversationEngine:
                 ]
             },
         }
+
+        if self.cli_path:
+            options_kwargs["cli_path"] = self.cli_path
 
         # Resume existing conversation if we have a session AND it has an
         # agent SDK id (rotation clears it to force a fresh underlying session).

@@ -199,6 +199,32 @@ CHAT_LARGE_TASK_HARD_CEILING_SECONDS = float(
     os.getenv("CHAT_LARGE_TASK_HARD_CEILING_SECONDS", "14400")
 )
 CHAT_PROGRESS_INTERVAL_SECONDS = float(os.getenv("CHAT_PROGRESS_INTERVAL_SECONDS", "300"))
+
+# --- Model selection -------------------------------------------------------
+# The Agent SDK ships its own `claude` binary and prefers it over the one on
+# PATH. That bundled CLI is pinned at 2.1.114, which predates the Claude 5
+# family entirely — its newest opus string is claude-opus-4-7. Left alone, the
+# `opus[1m]` alias in ~/.claude/settings.json resolved there, so Ricky ran
+# claude-opus-4-7 while Jason's own sessions ran Opus 5 (verified 2026-09-12).
+# Pointing cli_path at the system binary is what makes the Claude 5 models
+# reachable at all; without it CHAT_MODEL below would silently fail to resolve.
+_SYSTEM_CLAUDE_CLI = Path.home() / ".local" / "bin" / "claude"
+CHAT_CLI_PATH = os.getenv(
+    "CHAT_CLI_PATH",
+    str(_SYSTEM_CLAUDE_CLI) if _SYSTEM_CLAUDE_CLI.exists() else "",
+)
+
+# Default for ordinary chat turns. Opus 5 — 1M context, and roughly half
+# Fable's cost per turn.
+CHAT_MODEL = os.getenv("CHAT_MODEL", "claude-opus-5")
+
+# Reserved for jobs the engine classifies as large (decks, long multi-step
+# builds, code work). Fable 5.1 is the most capable model available and is
+# priced accordingly — measured 2026-09-12, a one-word reply cost $1.08 on
+# Fable 5.1 vs $0.45 on Opus 5, because the ~44k-token preamble dominates
+# every turn regardless of answer length. Set CHAT_HEAVY_MODEL=claude-opus-5
+# to collapse the two tiers back into one.
+CHAT_HEAVY_MODEL = os.getenv("CHAT_HEAVY_MODEL", "claude-fable-5-1")
 CHAT_ALLOWED_USERS = os.getenv("CHAT_ALLOWED_USERS", SLACK_OWNER_USER_ID).split(",")
 
 # Discord chat surface (works on any OS — unlike BlueBubbles)
