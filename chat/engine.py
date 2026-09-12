@@ -440,6 +440,12 @@ class ConversationEngine:
                 "WebSearch",
                 "WebFetch",
                 "NotebookEdit",
+                # Subagent dispatch. Without this, the 78 specialists in
+                # .claude/agents/ are only reachable from a Claude Code session
+                # — over Slack/iMessage they were unreachable dead weight.
+                # Tool name verified against the bundled CLI (2.1.114): the tool
+                # registers as "Agent" with "Task" as a legacy alias.
+                "Agent",
                 # Apify MCP — lets content-research score real engagement
                 # (view counts) on short-form refs instead of best-effort
                 # site:-restricted guessing. No-op if apify isn't configured.
