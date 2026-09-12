@@ -30,19 +30,24 @@ from config import (  # noqa: E402
     BLUEBUBBLES_POLL_INTERVAL,
     BLUEBUBBLES_URL,
     CHAT_ALLOWED_USERS,
+    CHAT_CLI_PATH,
     CHAT_DB_PATH,
     CHAT_HARD_CEILING_SECONDS,
+    CHAT_HEAVY_MODEL,
     CHAT_INACTIVITY_TIMEOUT_SECONDS,
     CHAT_LARGE_TASK_HARD_CEILING_SECONDS,
     CHAT_LARGE_TASK_INACTIVITY_TIMEOUT_SECONDS,
     CHAT_MAX_BUDGET_USD,
     CHAT_MAX_TURNS,
+    CHAT_MODEL,
     CHAT_PROGRESS_INTERVAL_SECONDS,
+    CODE_REPO_ALLOWLIST,
     DISCORD_ALLOWED_USER_IDS,
     DISCORD_BOT_TOKEN,
     IMESSAGE_ALLOWED_ADDRESSES,
     IMESSAGE_STATE_PATH,
     PROJECT_ROOT,
+    REPO_WORKSPACE_ROOT,
     SLACK_APP_TOKEN,
     SLACK_BOT_TOKEN,
     TELEGRAM_ALLOWED_USER_IDS,
@@ -143,6 +148,9 @@ def main() -> None:
         f"{CHAT_LARGE_TASK_INACTIVITY_TIMEOUT_SECONDS:.0f}s silence / "
         f"{CHAT_LARGE_TASK_HARD_CEILING_SECONDS:.0f}s total"
     )
+    print(f"  Model:         {CHAT_MODEL} (heavy: {CHAT_HEAVY_MODEL or 'off'})")
+    print(f"  CLI:           {CHAT_CLI_PATH or 'SDK bundled (no Claude 5 models)'}")
+    print(f"  Code repos:    {', '.join(CODE_REPO_ALLOWLIST) or 'none'} (under {REPO_WORKSPACE_ROOT})")
     print(f"  Chat surfaces: {', '.join(surfaces)}")
     print(f"{'=' * 60}\n")
 
@@ -160,6 +168,11 @@ def main() -> None:
             hard_ceiling_seconds=CHAT_HARD_CEILING_SECONDS,
             large_task_inactivity_timeout_seconds=CHAT_LARGE_TASK_INACTIVITY_TIMEOUT_SECONDS,
             large_task_hard_ceiling_seconds=CHAT_LARGE_TASK_HARD_CEILING_SECONDS,
+            cli_path=CHAT_CLI_PATH,
+            model=CHAT_MODEL,
+            heavy_model=CHAT_HEAVY_MODEL,
+            repo_workspace_root=REPO_WORKSPACE_ROOT,
+            code_repo_allowlist=CODE_REPO_ALLOWLIST,
         )
         print("  Engine OK")
         router = ChatRouter(engine, progress_interval_seconds=CHAT_PROGRESS_INTERVAL_SECONDS)
@@ -178,6 +191,11 @@ def main() -> None:
         hard_ceiling_seconds=CHAT_HARD_CEILING_SECONDS,
         large_task_inactivity_timeout_seconds=CHAT_LARGE_TASK_INACTIVITY_TIMEOUT_SECONDS,
         large_task_hard_ceiling_seconds=CHAT_LARGE_TASK_HARD_CEILING_SECONDS,
+        cli_path=CHAT_CLI_PATH,
+        model=CHAT_MODEL,
+        heavy_model=CHAT_HEAVY_MODEL,
+        repo_workspace_root=REPO_WORKSPACE_ROOT,
+        code_repo_allowlist=CODE_REPO_ALLOWLIST,
     )
     router = ChatRouter(engine, progress_interval_seconds=CHAT_PROGRESS_INTERVAL_SECONDS)
     _build_adapters(router, store)

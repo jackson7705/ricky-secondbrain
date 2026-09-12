@@ -1,9 +1,13 @@
 # Ricky's specialist agents
 
-73 named specialist subagents Ricky can dispatch via the `Agent` tool. The
+78 named specialist subagents Ricky can dispatch via the `Agent` tool. The
 Claude Agent SDK auto-discovers every `*.md` here because the chat engine runs
 with `setting_sources: ["user", "project"]` and `cwd = ~/SecondBrain` — no
 registration needed. Drop a valid agent file in, and it becomes dispatchable.
+
+Discovery is not enough on its own: `Agent` must also be in `allowed_tools` in
+`chat/engine.py`. It wasn't until 2026-09-12, which meant the whole roster was
+unreachable from Slack/iMessage and only usable inside a Claude Code session.
 
 ## Roster (curated "agency" set)
 
@@ -15,6 +19,20 @@ registration needed. Drop a valid agent file in, and it becomes dispatchable.
 | paid-media | 7 | PPC Strategist, Paid Social Strategist |
 | project-management | 7 | delivery / ops specialists |
 | finance | 5 | Financial Analyst, Bookkeeper & Controller |
+| engineering | 5 | Backend Engineer, Frontend Engineer, Code Reviewer, Test Engineer, Debugger |
+
+## Models
+
+A subagent inherits the parent turn's model unless its frontmatter pins one, so
+a Fable 5.1 code turn that fans out to five specialists runs all five at Fable
+rates. Pinning works with full model IDs — verified 2026-09-12: parent on
+`claude-fable-5-1` ($0.92), subagent on `claude-sonnet-5` ($0.11), same turn.
+
+Two of the engineering agents are pinned to `claude-sonnet-5` because their work
+is the most mechanical: **Test Engineer** and **Frontend Engineer**. Backend
+Engineer, Code Reviewer, and Debugger inherit deliberately — they run at
+whatever tier the turn is worth, and root-causing is where the capability
+actually pays. Delete the `model:` line to put one back on inherit.
 
 ## How Ricky uses them
 
@@ -27,8 +45,15 @@ generic by design — the branding lives at Ricky's level, not theirs.
 
 ## Source & license
 
-Vendored from **[msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents)**
-(MIT — see `LICENSE.agency-agents`). Only the agency-relevant divisions were
-imported; engineering/GIS/healthcare/etc. were left out to keep Ricky's roster
-lean. To add or refresh: copy division `*.md` files here and commit — no code
-changes required.
+The `marketing` / `sales` / `design` / `paid-media` / `project-management` /
+`finance` divisions are vendored from
+**[msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents)**
+(MIT — see `LICENSE.agency-agents`). GIS/healthcare/etc. were left out to keep
+the roster lean. To add or refresh: copy division `*.md` files here and commit —
+no code changes required.
+
+The `engineering-*.md` files are **written locally, not vendored** — they're
+tuned to this stack (Python + `uv`, Claude Agent SDK, Next.js/Tailwind, launchd)
+and to the verification rules in `SOUL.md`. Every one of them is required to run
+what it wrote and paste real output before reporting done. Edit them here; don't
+overwrite them from upstream.
