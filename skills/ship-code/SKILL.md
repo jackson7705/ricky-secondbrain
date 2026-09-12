@@ -31,18 +31,22 @@ push it" gets a confirmation question, not a push.
 | Change touches production data, migrations, or a live customer site | Stop. Ask. Do not open a PR that could be merged without Jason understanding the blast radius |
 | Repo is `jackson7705/ricky-secondbrain` | **Public repo.** Secret scan is mandatory before every commit (see below) |
 
-### Repo allowlist (starting set)
+### Repo allowlist
 
-- `jackson7705/ricky-secondbrain` — Ricky itself (**public**)
-- `jackson7705/jason-second-brain-vault` — memory vault (private; prefer the
-  normal git-sync path, not PRs, for daily-log content)
-- `Locafy/google-ads-platform`
-- `Locafy/locafy-website`
-- `Locafy/locafy-marketing`
-- `Locafy/triton`
-- `~/Projects/mission-control` — local only, no remote configured yet
+Live in `scripts/config.py` → `CODE_REPO_ALLOWLIST` (override with the env var
+of the same name). As of 2026-09-12:
 
-Anything else: ask.
+- `mission-control` — local only, no remote configured yet
+- `google-ads-platform`
+- `locafy-website`
+- `locafy-marketing`
+- `triton`
+
+Plus two that need no entry: `ricky-secondbrain` is already inside `cwd`, and
+`jason-second-brain-vault` syncs through git-sync rather than PRs.
+
+Deliberately excluded as too load-bearing: `unify-api`, `locafy-crm`,
+`governance`. Anything not listed: ask Jason, naming the repo.
 
 ## Workspace
 
@@ -52,11 +56,16 @@ Repos live in `~/Projects/<repo-name>`. If the repo isn't there:
 gh repo clone Locafy/<repo> ~/Projects/<repo>
 ```
 
-**Known limitation (2026-09-12):** the chat engine pins `cwd` to
-`~/SecondBrain` (`chat/engine.py:386`). Work outside that tree runs through
-`Bash` with absolute paths. If `Edit`/`Write` is refused on a path outside
-`~/SecondBrain`, that's the cause — say so plainly rather than working around it
-by piping heredocs into files. The repo-workspace fix is a separate change.
+**How access works (fixed 2026-09-12):** the engine keeps `cwd` at
+`~/SecondBrain` — moving it would strip skill, agent, and settings discovery —
+and grants repo access per-turn through the SDK's `add_dirs`. A repo is opened
+when the turn looks like code work or when a message names it, and only if it
+appears in `CODE_REPO_ALLOWLIST` (`scripts/config.py`). Ordinary turns get
+nothing: a calendar question holds no write access to the Locafy repos.
+
+If a repo isn't cloned to `~/Projects/<name>`, the engine logs the exact
+`gh repo clone` command and proceeds without it — Ricky has no access that turn,
+so say that plainly rather than trying to work around it.
 
 ## The Flow
 

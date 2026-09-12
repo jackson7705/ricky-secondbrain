@@ -121,6 +121,37 @@ def _model_for(text: str, default_model: str, heavy_model: str) -> str:
     return default_model
 
 
+def _repo_dirs_for(
+    text: str,
+    workspace_root: Path,
+    allowlist: list[str],
+) -> list[str]:
+    """Allowlisted repos this turn may write to, as absolute paths.
+
+    Granted when the turn looks like code work, or when the message names a
+    repo outright ("check locafy-website"). Ordinary turns get nothing — a
+    calendar question has no business holding write access to the Locafy repos.
+    Repos that aren't cloned locally are skipped rather than passed through;
+    the SDK rejects directories that don't exist.
+    """
+    if not allowlist:
+        return []
+    named = [r for r in allowlist if re.search(rf"\b{re.escape(r)}\b", text, re.IGNORECASE)]
+    if not named and not _HEAVY_MODEL_INTENT_RE.search(text):
+        return []
+    dirs = []
+    for repo in named or allowlist:
+        path = workspace_root / repo
+        if path.is_dir():
+            dirs.append(str(path))
+        elif repo in named:
+            # Named outright but not on disk. Say so — otherwise Ricky just
+            # silently lacks access and reports a confusing failure later.
+            print(f"[{datetime.now()}] Repo '{repo}' not cloned at {path} — "
+                  f"run: gh repo clone <owner>/{repo} {path}")
+    return dirs
+
+
 def _next_watchdog_timeout(policy: TaskRuntimePolicy, elapsed_seconds: float) -> float:
     """Return the next wait duration without extending the absolute deadline."""
     remaining = policy.hard_ceiling_seconds - elapsed_seconds
@@ -234,6 +265,8 @@ class ConversationEngine:
         cli_path: str = "",
         model: str = "claude-opus-5",
         heavy_model: str = "",
+        repo_workspace_root: Path | None = None,
+        code_repo_allowlist: list[str] | None = None,
     ) -> None:
         self.session_store = session_store
         self.project_root = project_root
@@ -245,6 +278,11 @@ class ConversationEngine:
         self.cli_path = cli_path
         self.model = model
         self.heavy_model = heavy_model
+        # Repos outside the vault Ricky may write to. cwd stays ~/SecondBrain —
+        # moving it would strip skill/agent/settings discovery — so access is
+        # granted per-turn through add_dirs instead. See config.CODE_REPO_ALLOWLIST.
+        self.repo_workspace_root = repo_workspace_root or (Path.home() / "Projects")
+        self.code_repo_allowlist = code_repo_allowlist or []
         # Rotate the underlying Agent SDK session when it gets stale. Keeps
         # cumulative cost bounded (so we don't drift back into the $100 budget
         # cap) and keeps the in-context history short (faster + cheaper turns).
@@ -381,11 +419,17 @@ class ConversationEngine:
             self.large_runtime_policy,
         )
         turn_model = _model_for(message.text, self.model, self.heavy_model)
+        repo_dirs = _repo_dirs_for(
+            message.text,
+            self.repo_workspace_root,
+            self.code_repo_allowlist,
+        )
         print(
             f"[{datetime.now()}] Runtime profile={runtime_policy.name} "
             f"(silence={runtime_policy.inactivity_timeout_seconds:.0f}s, "
             f"ceiling={runtime_policy.hard_ceiling_seconds:.0f}s) "
-            f"model={turn_model}"
+            f"model={turn_model} "
+            f"repos={[Path(d).name for d in repo_dirs] or 'vault only'}"
         )
 
         # Hard-inject the deliverable rule when the user's message looks like
@@ -527,6 +571,8 @@ class ConversationEngine:
 
         if self.cli_path:
             options_kwargs["cli_path"] = self.cli_path
+        if repo_dirs:
+            options_kwargs["add_dirs"] = repo_dirs
 
         # Resume existing conversation if we have a session AND it has an
         # agent SDK id (rotation clears it to force a fresh underlying session).

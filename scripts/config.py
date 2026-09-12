@@ -225,6 +225,25 @@ CHAT_MODEL = os.getenv("CHAT_MODEL", "claude-opus-5")
 # every turn regardless of answer length. Set CHAT_HEAVY_MODEL=claude-opus-5
 # to collapse the two tiers back into one.
 CHAT_HEAVY_MODEL = os.getenv("CHAT_HEAVY_MODEL", "claude-fable-5-1")
+
+# --- Code workspace --------------------------------------------------------
+# Repos Ricky may read and write outside the vault. The chat engine keeps
+# cwd = ~/SecondBrain (that is what makes .claude/agents, skills, and settings
+# discoverable at all) and grants access to these via the SDK's add_dirs, only
+# on code-shaped turns or when a message names one by hand.
+#
+# This list is the boundary for autonomous work — see skills/ship-code/SKILL.md
+# → Autonomy. Deliberately excluded as too load-bearing: unify-api, locafy-crm,
+# governance. Add them only with a reason.
+REPO_WORKSPACE_ROOT = Path(os.getenv("REPO_WORKSPACE_ROOT", str(Path.home() / "Projects")))
+CODE_REPO_ALLOWLIST = [
+    r.strip()
+    for r in os.getenv(
+        "CODE_REPO_ALLOWLIST",
+        "mission-control,google-ads-platform,locafy-website,locafy-marketing,triton",
+    ).split(",")
+    if r.strip()
+]
 CHAT_ALLOWED_USERS = os.getenv("CHAT_ALLOWED_USERS", SLACK_OWNER_USER_ID).split(",")
 
 # Discord chat surface (works on any OS — unlike BlueBubbles)
