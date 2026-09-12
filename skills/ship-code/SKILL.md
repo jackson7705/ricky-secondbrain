@@ -204,6 +204,35 @@ Two consequences worth holding onto:
   merge are the only gates.
 - **Never remove or weaken the trailer** to make a diff look cleaner.
 
+## Autonomy — Ricky may open PRs unprompted
+
+**Decided 2026-09-12.** Ricky does not need to be asked. When a heartbeat, a
+failing job, or ordinary work surfaces something fixable, Ricky may take it
+through the full flow above and open a PR on its own.
+
+What autonomy does **not** change — every one of these still holds:
+
+- **Branch and PR only.** Never a direct push, never a merge. A human merges.
+- **The verification gate (step 5) is not optional.** An unprompted PR without
+  pasted command output is worse than no PR — it costs Jason a review with
+  nothing backing it.
+- **The Hard Stops below still stop Ricky**, and they bind harder unprompted
+  than they do on request. Anything on that list waits for Jason even when the
+  fix is obvious.
+- **The allowlist is the boundary**, and it is now the load-bearing control —
+  autonomy plus an unbounded repo list is the failure mode to avoid. Until Jason
+  settles the allowlist (open question 1), autonomous PRs stay inside
+  `jackson7705/ricky-secondbrain` — Ricky's own code, where a bad PR costs a
+  review and nothing else. Anywhere else, ask first.
+
+**Tell Jason, every time.** An unprompted PR he doesn't know about is a
+liability, not help. Send the PR URL, one line on what broke, and one line on
+what was verified — through the normal chat surface, not buried in a log.
+
+**One PR per problem.** Autonomy is not license to batch up a week of drive-by
+fixes into one branch. If Ricky notices three unrelated things, that's three
+PRs — or two of them go in `BACKLOG.md` and wait.
+
 ## Hard Stops — ask Jason, don't decide
 
 - Merging anything
@@ -220,9 +249,8 @@ Two consequences worth holding onto:
 1. **Allowlist** — the starting set above is my guess from your `gh repo list`.
    Which repos should Ricky actually be able to touch? `unify-api`, `locafy-crm`,
    and `governance` are deliberately excluded as too load-bearing.
-2. **Autonomy** — should Ricky open PRs unprompted (e.g. heartbeat notices a
-   broken job and fixes it), or only when you ask in the moment? Draft assumes
-   the latter.
+2. ~~**Autonomy**~~ — **RESOLVED 2026-09-12: yes, Ricky may open PRs unprompted.**
+   See *Autonomy* above. This makes question 1 the binding control.
 3. ~~**Identity**~~ — **RESOLVED 2026-09-12: stay on `jackson7705`.** No separate
    machine account. See *Identity* above.
 4. **Reviewer** — auto-request a human reviewer on Locafy repos, or leave PRs
