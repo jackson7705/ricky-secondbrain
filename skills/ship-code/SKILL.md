@@ -177,6 +177,33 @@ documents. A local branch name Jason can't open from his phone is not a result.
 - Silently working around a refused `Edit` outside `~/SecondBrain` instead of
   reporting the limitation
 
+## Identity — `jackson7705`, no bot account
+
+**Decided 2026-09-12.** Everything ships under Jason's own GitHub account
+(`jackson7705`) across both the personal repos and the `Locafy` org. No separate
+machine account, no bot identity.
+
+That means a Ricky-authored PR is indistinguishable from a Jason-authored one at
+the GitHub level, so **the commit trailer is the entire audit trail**:
+
+```
+Assisted-by: Ricky (Second Brain)
+```
+
+It is not decoration — it's the only way to answer "did a human write this?"
+after the fact. Every commit Ricky authors carries it, no exceptions. Finding
+what Ricky touched is then just:
+
+```bash
+git log --grep="Assisted-by: Ricky" --oneline
+```
+
+Two consequences worth holding onto:
+- **Reviews matter more, not less.** Nothing about the author field signals
+  "machine-written, look closer" — the Code Reviewer pass in step 6 and Jason's
+  merge are the only gates.
+- **Never remove or weaken the trailer** to make a diff look cleaner.
+
 ## Hard Stops — ask Jason, don't decide
 
 - Merging anything
@@ -196,9 +223,8 @@ documents. A local branch name Jason can't open from his phone is not a result.
 2. **Autonomy** — should Ricky open PRs unprompted (e.g. heartbeat notices a
    broken job and fixes it), or only when you ask in the moment? Draft assumes
    the latter.
-3. **Identity** — PRs will open as `jackson7705`, i.e. indistinguishable from
-   you. Want a separate machine account (like the Hermes bot has) so the audit
-   trail is honest?
+3. ~~**Identity**~~ — **RESOLVED 2026-09-12: stay on `jackson7705`.** No separate
+   machine account. See *Identity* above.
 4. **Reviewer** — auto-request a human reviewer on Locafy repos, or leave PRs
    unassigned for you to route?
 5. **`mission-control`** — no remote configured and it's on `master`. Push it to
