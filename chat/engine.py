@@ -121,6 +121,54 @@ def _model_for(text: str, default_model: str, heavy_model: str) -> str:
     return default_model
 
 
+_FILE_WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+
+# Secrets that live under scripts/ and must stay unwritable even though the
+# directory as a whole is now self-editable. Belt to the block-secrets hook's
+# braces — that hook is the real enforcement, this is the second line.
+_NEVER_WRITABLE_RE = re.compile(r"(\.env($|\.)|credentials\.json|_token\.json|\.pem$|\.key$)", re.IGNORECASE)
+
+
+def _make_permission_callback(scripts_dir: Path):
+    """Allow Ricky to edit its own scripts/ — nothing else.
+
+    Claude Code hard-codes `.claude/**` as sensitive, exempting only skills,
+    agents, commands, worktrees, and scheduled_tasks.json (verified against CLI
+    2.1.269). `.claude/scripts/` isn't on that list, and no settings rule
+    overrides it — which is why work built in chat kept getting stranded in
+    /tmp/ricky-build waiting for a desktop terminal to apply it.
+
+    This callback only ever runs for calls the CLI would otherwise prompt on,
+    so denying everything else preserves today's behavior exactly rather than
+    widening it. Deliberately NOT permission_mode="bypassPermissions", which
+    would also unlock ~/.claude, .git, and the hook that enforces the rest.
+    """
+
+    # Imported lazily, matching how the rest of this module defers the SDK.
+    from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
+
+    async def can_use_tool(tool_name: str, tool_input: dict[str, Any], context: Any) -> Any:
+        raw = tool_input.get("file_path") or tool_input.get("path") or ""
+        if tool_name in _FILE_WRITE_TOOLS and raw:
+            target = Path(str(raw)).expanduser()
+            try:
+                resolved = target.resolve()
+                inside = resolved.is_relative_to(scripts_dir.resolve())
+            except (OSError, ValueError):
+                inside = False
+            if inside and not _NEVER_WRITABLE_RE.search(resolved.name):
+                print(f"[{datetime.now()}] Self-edit allowed: {resolved}")
+                return PermissionResultAllow()
+        return PermissionResultDeny(
+            message=(
+                f"{tool_name} on {raw or 'this target'} is outside Ricky's "
+                "self-edit scope (.claude/scripts/, excluding credentials)."
+            )
+        )
+
+    return can_use_tool
+
+
 def _repo_dirs_for(
     text: str,
     workspace_root: Path,
@@ -571,6 +619,9 @@ class ConversationEngine:
 
         if self.cli_path:
             options_kwargs["cli_path"] = self.cli_path
+        options_kwargs["can_use_tool"] = _make_permission_callback(
+            self.project_root / ".claude" / "scripts"
+        )
         if repo_dirs:
             options_kwargs["add_dirs"] = repo_dirs
 
@@ -626,7 +677,20 @@ class ConversationEngine:
         agent_started = monotonic()
 
         try:
-            _agen = query(prompt=message.text, options=options).__aiter__()
+            # Streaming-mode prompt (an AsyncIterable, not a str) — required
+            # whenever can_use_tool is set, which is how Ricky gets write
+            # access to its own scripts/. A plain string raises
+            # "can_use_tool callback requires streaming mode" and every turn
+            # fails, so these two must change together.
+            async def _prompt_stream(text: str = message.text):
+                yield {
+                    "type": "user",
+                    "message": {"role": "user", "content": text},
+                    "parent_tool_use_id": None,
+                    "session_id": "default",
+                }
+
+            _agen = query(prompt=_prompt_stream(), options=options).__aiter__()
             while True:
                 elapsed_total = monotonic() - agent_started
                 hard_ceiling_is_next = (

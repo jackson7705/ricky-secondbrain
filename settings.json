@@ -53,5 +53,11 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Edit(//Users/magicman/SecondBrain/.claude/scripts/**)",
+      "Write(//Users/magicman/SecondBrain/.claude/scripts/**)"
+    ]
   }
 }
