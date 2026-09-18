@@ -143,3 +143,85 @@ def test_failed_progress_update_does_not_cancel_large_job() -> None:
 
     adapter = asyncio.run(run())
     assert adapter.updated[-1].text == "Finished the large job"
+
+
+class _FakeStore:
+    def __init__(self, session: Any) -> None:
+        self.session = session
+        self.updated: list[Any] = []
+
+    def get(self, *_: Any) -> Any:
+        return self.session
+
+    def update(self, session: Any) -> None:
+        self.updated.append(session)
+
+    def create(self, session: Any) -> None:
+        self.updated.append(session)
+
+
+def _run_engine(
+    monkeypatch: pytest.MonkeyPatch, fake_query: Any
+) -> tuple[list[OutgoingMessage], _FakeStore]:
+    from datetime import datetime
+
+    import claude_agent_sdk
+    from engine import ConversationEngine
+    from session import Session
+
+    now = datetime.now()
+    store = _FakeStore(
+        Session(
+            session_id="cli:c1:c1",
+            agent_session_id="stale-id",
+            platform="cli",
+            channel_id="c1",
+            thread_id="c1",
+            user_id="u1",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    monkeypatch.setattr(claude_agent_sdk, "query", fake_query)
+    engine = ConversationEngine(store, Path("."))  # type: ignore[arg-type]
+    incoming = IncomingMessage(
+        text="hello",
+        user=User(Platform.CLI, "u1"),
+        channel=Channel(Platform.CLI, "c1"),
+        platform=Platform.CLI,
+    )
+
+    async def _collect() -> list[OutgoingMessage]:
+        return [out async for out in engine.handle_message(incoming)]
+
+    return asyncio.run(_collect()), store
+
+
+def test_failed_resume_retries_as_fresh_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    from claude_agent_sdk import AssistantMessage, TextBlock
+
+    calls: list[str | None] = []
+
+    async def fake_query(*, prompt: str, options: Any) -> Any:
+        calls.append(options.resume)
+        if options.resume:
+            options.stderr("No conversation found with session ID: stale-id")
+            raise RuntimeError("Command failed with exit code 1")
+        yield AssistantMessage(content=[TextBlock(text="fresh answer")], model="m")
+
+    outputs, _ = _run_engine(monkeypatch, fake_query)
+
+    assert calls == ["stale-id", None]
+    assert [o.text for o in outputs] == ["fresh answer"]
+
+
+def test_error_reply_includes_cli_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_query(*, prompt: str, options: Any) -> Any:
+        options.stderr("Invalid API key · Please run /login")
+        raise RuntimeError("Command failed with exit code 1")
+        yield  # pragma: no cover
+
+    outputs, _ = _run_engine(monkeypatch, fake_query)
+
+    assert len(outputs) == 1
+    assert "Invalid API key" in outputs[0].text

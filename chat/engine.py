@@ -510,6 +510,11 @@ class ConversationEngine:
             message.text += attachment_ctx
             print(f"[{datetime.now()}] Injected {len(message.attachments)} attachment(s) into prompt")
 
+        # The SDK's ProcessError only says "Check stderr output for details";
+        # collect the CLI's stderr so the real cause reaches the log and the user.
+        cli_stderr: list[str] = []
+        options_kwargs["stderr"] = cli_stderr.append
+
         options = ClaudeAgentOptions(**options_kwargs)
 
         # Run the agent
@@ -534,102 +539,130 @@ class ConversationEngine:
         # absolute deadline is enforced even when no SDK message ever arrives.
         agent_started = monotonic()
 
-        try:
-            _agen = query(prompt=message.text, options=options).__aiter__()
-            while True:
-                elapsed_total = monotonic() - agent_started
-                hard_ceiling_is_next = (
-                    runtime_policy.hard_ceiling_seconds - elapsed_total
-                    <= runtime_policy.inactivity_timeout_seconds
-                )
-                wait_timeout = _next_watchdog_timeout(runtime_policy, elapsed_total)
-                if wait_timeout <= 0:
-                    raise TimeoutError(
-                        f"Agent took >{runtime_policy.hard_ceiling_seconds:.0f}s total — aborted."
-                    )
-                try:
-                    sdk_message = await _asyncio.wait_for(
-                        _agen.__anext__(), timeout=wait_timeout
-                    )
-                except StopAsyncIteration:
-                    break
-                except TimeoutError:
+        while True:
+            try:
+                _agen = query(prompt=message.text, options=options).__aiter__()
+                while True:
                     elapsed_total = monotonic() - agent_started
-                    if hard_ceiling_is_next:
+                    hard_ceiling_is_next = (
+                        runtime_policy.hard_ceiling_seconds - elapsed_total
+                        <= runtime_policy.inactivity_timeout_seconds
+                    )
+                    wait_timeout = _next_watchdog_timeout(runtime_policy, elapsed_total)
+                    if wait_timeout <= 0:
+                        raise TimeoutError(
+                            f"Agent took >{runtime_policy.hard_ceiling_seconds:.0f}s total — aborted."
+                        )
+                    try:
+                        sdk_message = await _asyncio.wait_for(
+                            _agen.__anext__(), timeout=wait_timeout
+                        )
+                    except StopAsyncIteration:
+                        break
+                    except TimeoutError:
+                        elapsed_total = monotonic() - agent_started
+                        if hard_ceiling_is_next:
+                            print(
+                                f"[{datetime.now()}] Agent SDK hard ceiling hit after "
+                                f"{elapsed_total:.0f}s — aborting runaway"
+                            )
+                            raise TimeoutError(
+                                f"Agent took >{runtime_policy.hard_ceiling_seconds:.0f}s "
+                                "total — aborted."
+                            )
                         print(
-                            f"[{datetime.now()}] Agent SDK hard ceiling hit after "
-                            f"{elapsed_total:.0f}s — aborting runaway"
+                            f"[{datetime.now()}] Agent SDK inactivity timeout after "
+                            f"{runtime_policy.inactivity_timeout_seconds:.0f}s of silence "
+                            f"(profile={runtime_policy.name}) — aborting"
                         )
                         raise TimeoutError(
-                            f"Agent took >{runtime_policy.hard_ceiling_seconds:.0f}s "
-                            "total — aborted."
+                            "Agent went silent for "
+                            f">{runtime_policy.inactivity_timeout_seconds:.0f}s — aborted."
                         )
-                    print(
-                        f"[{datetime.now()}] Agent SDK inactivity timeout after "
-                        f"{runtime_policy.inactivity_timeout_seconds:.0f}s of silence "
-                        f"(profile={runtime_policy.name}) — aborting"
-                    )
-                    raise TimeoutError(
-                        "Agent went silent for "
-                        f">{runtime_policy.inactivity_timeout_seconds:.0f}s — aborted."
-                    )
-                if isinstance(sdk_message, AssistantMessage):
-                    # Reset on each new AssistantMessage (keep only the latest turn)
-                    response_text = ""
-                    for block in sdk_message.content:
-                        if isinstance(block, TextBlock):
-                            response_text += block.text
+                    if isinstance(sdk_message, AssistantMessage):
+                        # Reset on each new AssistantMessage (keep only the latest turn)
+                        response_text = ""
+                        for block in sdk_message.content:
+                            if isinstance(block, TextBlock):
+                                response_text += block.text
 
-                    # Yield response updates
-                    if response_text.strip():
-                        yield OutgoingMessage(
-                            text=response_text,
-                            channel=message.channel,
-                            thread=message.thread,
-                            is_update=not first_yield,
-                        )
-                        first_yield = False
+                        # Yield response updates
+                        if response_text.strip():
+                            yield OutgoingMessage(
+                                text=response_text,
+                                channel=message.channel,
+                                thread=message.thread,
+                                is_update=not first_yield,
+                            )
+                            first_yield = False
 
-                elif isinstance(sdk_message, ResultMessage):
-                    session_id_from_sdk = sdk_message.session_id
-                    cost_usd = sdk_message.total_cost_usd
-                    cost_str = f"${cost_usd:.4f}" if cost_usd else "N/A"
-                    print(
-                        f"[{datetime.now()}] Agent completed: "
-                        f"session={session_id_from_sdk}, cost={cost_str}"
-                    )
-
-                    # Scan final response for attachment paths (images + PDFs +
-                    # office docs) and send them back through the chat adapter.
-                    attachment_paths = self._extract_attachment_paths(response_text)
-                    if attachment_paths:
-                        attachments_out = [
-                            Attachment(filename=Path(p).name, mimetype=mt, url=p)
-                            for p, mt in attachment_paths
-                        ]
-                        kinds = ", ".join(sorted({mt for _, mt in attachment_paths}))
+                    elif isinstance(sdk_message, ResultMessage):
+                        session_id_from_sdk = sdk_message.session_id
+                        cost_usd = sdk_message.total_cost_usd
+                        cost_str = f"${cost_usd:.4f}" if cost_usd else "N/A"
                         print(
-                            f"[{datetime.now()}] Detected {len(attachments_out)} "
-                            f"attachment(s) to send back ({kinds})"
+                            f"[{datetime.now()}] Agent completed: "
+                            f"session={session_id_from_sdk}, cost={cost_str}"
                         )
-                        yield OutgoingMessage(
-                            text=response_text,
-                            channel=message.channel,
-                            thread=message.thread,
-                            is_update=not first_yield,
-                            attachments=attachments_out,
-                        )
-                        first_yield = False
 
-        except Exception as e:
-            print(f"[{datetime.now()}] Agent SDK error: {e}")
-            yield OutgoingMessage(
-                text=f"Sorry, I hit an error: {e}",
-                channel=message.channel,
-                thread=message.thread,
-                is_update=not first_yield,
-            )
-            return
+                        # Scan final response for attachment paths (images + PDFs +
+                        # office docs) and send them back through the chat adapter.
+                        attachment_paths = self._extract_attachment_paths(response_text)
+                        if attachment_paths:
+                            attachments_out = [
+                                Attachment(filename=Path(p).name, mimetype=mt, url=p)
+                                for p, mt in attachment_paths
+                            ]
+                            kinds = ", ".join(sorted({mt for _, mt in attachment_paths}))
+                            print(
+                                f"[{datetime.now()}] Detected {len(attachments_out)} "
+                                f"attachment(s) to send back ({kinds})"
+                            )
+                            yield OutgoingMessage(
+                                text=response_text,
+                                channel=message.channel,
+                                thread=message.thread,
+                                is_update=not first_yield,
+                                attachments=attachments_out,
+                            )
+                            first_yield = False
+
+            except Exception as e:
+                stderr_tail = "\n".join(cli_stderr[-15:]).strip()
+                print(f"[{datetime.now()}] Agent SDK error: {e}")
+                if stderr_tail:
+                    print(f"[{datetime.now()}] Claude CLI stderr:\n{stderr_tail}")
+
+                # A resumed session the CLI can no longer load (transcript
+                # pruned, CLI upgraded, cwd moved) dies at startup with a bare
+                # "exit code 1". Nothing has been sent yet, so drop the resume
+                # and retry once as a fresh conversation.
+                if (
+                    options_kwargs.get("resume")
+                    and first_yield
+                    and not isinstance(e, TimeoutError)
+                ):
+                    print(
+                        f"[{datetime.now()}] Resume of "
+                        f"{options_kwargs['resume']} failed — retrying fresh"
+                    )
+                    options_kwargs.pop("resume")
+                    cli_stderr.clear()
+                    options = ClaudeAgentOptions(**options_kwargs)
+                    agent_started = monotonic()
+                    continue
+
+                detail = f"{e}"
+                if stderr_tail and stderr_tail not in detail:
+                    detail += f"\n```\n{stderr_tail[-800:]}\n```"
+                yield OutgoingMessage(
+                    text=f"Sorry, I hit an error: {detail}",
+                    channel=message.channel,
+                    thread=message.thread,
+                    is_update=not first_yield,
+                )
+                return
+            break
 
         # Persist session
         if session_id_from_sdk:
