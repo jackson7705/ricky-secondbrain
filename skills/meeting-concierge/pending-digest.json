@@ -1,0 +1,87 @@
+[
+  {
+    "action_id": "796970229:1",
+    "meeting_title": "Project Atlas / Map Labs \u2014 PA redline call (Aug 24)",
+    "meeting_date": "2026-08-24",
+    "text": "Track Evan's revised PA redline (warranties, covenants, revenue-target section, MapLabs-as-product-line clause). Evan committed to send an updated draft addressing the material objections raised on this call, then schedule a separate commercial-terms call.",
+    "owner": "jason",
+    "due": "2026-08-29",
+    "proposed_list": "Inbox",
+    "needs_followup_email": false,
+    "followup": {
+      "to": "",
+      "subject": "",
+      "body": ""
+    },
+    "status": "approved",
+    "queued_at": "2026-08-25T01:11:12+00:00"
+  },
+  {
+    "action_id": "796970229:2",
+    "meeting_title": "Project Atlas / Map Labs \u2014 PA redline call (Aug 24)",
+    "meeting_date": "2026-08-24",
+    "text": "Track Evan's promised copy of the Humana RFP. Evan committed to send if requested. Circulate to Melvin/Gavin/Tim on receipt and flag material clauses that impact the warranty/covenant carveouts we're negotiating.",
+    "owner": "jason",
+    "due": "2026-08-27",
+    "proposed_list": "Inbox",
+    "needs_followup_email": false,
+    "followup": {
+      "to": "",
+      "subject": "",
+      "body": ""
+    },
+    "status": "approved",
+    "queued_at": "2026-08-25T01:11:12+00:00"
+  },
+  {
+    "action_id": "796970229:3",
+    "meeting_title": "Project Atlas / Map Labs \u2014 PA redline call (Aug 24)",
+    "meeting_date": "2026-08-24",
+    "text": "Melvin will return an updated Locafy position after synthesizing this call ('I'll take whatever we glean from this conversation, and I'll return back what I think it should be'). Confirm Melvin has what he needs from the DD/finance side, and expect the response to land inside the week.",
+    "owner": "jason",
+    "due": "2026-08-28",
+    "proposed_list": "Inbox",
+    "needs_followup_email": false,
+    "followup": {
+      "to": "",
+      "subject": "",
+      "body": ""
+    },
+    "status": "approved",
+    "queued_at": "2026-08-25T01:11:12+00:00"
+  },
+  {
+    "action_id": "796970229:4",
+    "meeting_title": "Project Atlas / Map Labs \u2014 PA redline call (Aug 24)",
+    "meeting_date": "2026-08-24",
+    "text": "Review the Uberall zero-commit citation-reseller partnership Evan already shared. Evaluate whether counting Map-Labs-originated Locafy citation sales toward Evan's revenue target is defensible, and prepare a position for the commercial-terms call.",
+    "owner": "jason",
+    "due": "2026-08-27",
+    "proposed_list": "Inbox",
+    "needs_followup_email": false,
+    "followup": {
+      "to": "",
+      "subject": "",
+      "body": ""
+    },
+    "status": "approved",
+    "queued_at": "2026-08-25T01:11:12+00:00"
+  },
+  {
+    "action_id": "796970229:5",
+    "meeting_title": "Project Atlas / Map Labs \u2014 PA redline call (Aug 24)",
+    "meeting_date": "2026-08-24",
+    "text": "Prep for the commercial-terms follow-up call. Points to have ready: (a) Locafy's stance on the 80% vs 90% earnout threshold (Melvin held firm on 90% on the call), (b) MapLabs-as-independent-product-line clause acceptable scope, (c) hire/fire and cash-minimum covenants Locafy will not accept, (d) whether Map-Labs-originated Locafy revenue counts toward earnout targets.",
+    "owner": "jason",
+    "due": "2026-08-31",
+    "proposed_list": "Inbox",
+    "needs_followup_email": false,
+    "followup": {
+      "to": "",
+      "subject": "",
+      "body": ""
+    },
+    "status": "approved",
+    "queued_at": "2026-08-25T01:11:12+00:00"
+  }
+]

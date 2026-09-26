@@ -126,11 +126,21 @@ _FILE_WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 # Secrets that live under scripts/ and must stay unwritable even though the
 # directory as a whole is now self-editable. Belt to the block-secrets hook's
 # braces — that hook is the real enforcement, this is the second line.
-_NEVER_WRITABLE_RE = re.compile(r"(\.env($|\.)|credentials\.json|_token\.json|\.pem$|\.key$)", re.IGNORECASE)
+_NEVER_WRITABLE_RE = re.compile(
+    # `_token\w*\.json` covers the per-profile files (google_token_growthpro.json),
+    # which the original `_token\.json` missed. `.pending_oauth_*` holds a PKCE
+    # verifier mid-flow.
+    r"(\.env($|\.)|credentials\.json|_token\w*\.json|\.pending_oauth_|\.pem$|\.key$)",
+    re.IGNORECASE,
+)
 
 
-def _make_permission_callback(scripts_dir: Path):
-    """Allow Ricky to edit its own scripts/ — nothing else.
+def _make_permission_callback(editable_dirs: list[Path]):
+    """Allow Ricky to edit its own scripts/ and skills/ — nothing else.
+
+    Widened from scripts/ only to scripts/ + skills/ on 2026-09-13 at Jason's
+    say-so: skill code (invoice-router, meeting-concierge, ...) was still going
+    through shell-write workarounds while scripts/ had a clean edit path.
 
     Claude Code hard-codes `.claude/**` as sensitive, exempting only skills,
     agents, commands, worktrees, and scheduled_tasks.json (verified against CLI
@@ -153,7 +163,7 @@ def _make_permission_callback(scripts_dir: Path):
             target = Path(str(raw)).expanduser()
             try:
                 resolved = target.resolve()
-                inside = resolved.is_relative_to(scripts_dir.resolve())
+                inside = any(resolved.is_relative_to(d.resolve()) for d in editable_dirs)
             except (OSError, ValueError):
                 inside = False
             if inside and not _NEVER_WRITABLE_RE.search(resolved.name):
@@ -162,7 +172,7 @@ def _make_permission_callback(scripts_dir: Path):
         return PermissionResultDeny(
             message=(
                 f"{tool_name} on {raw or 'this target'} is outside Ricky's "
-                "self-edit scope (.claude/scripts/, excluding credentials)."
+                "self-edit scope (.claude/scripts/ and .claude/skills/, excluding credentials)."
             )
         )
 
@@ -371,7 +381,9 @@ class ConversationEngine:
         if not attachments:
             return ""
 
-        lines = ["\n\n[ATTACHED FILES from user via Slack:]"]
+        # Label is platform-neutral: iMessage feeds this path too now, not just
+        # Slack, and naming the wrong surface confuses the agent about context.
+        lines = ["\n\n[ATTACHED FILES from user:]"]
         for att in attachments:
             local_path = att.url  # local file path stored in url field
             lines.append(f"- {att.filename} ({att.mimetype}) saved at: {local_path}")
@@ -620,7 +632,10 @@ class ConversationEngine:
         if self.cli_path:
             options_kwargs["cli_path"] = self.cli_path
         options_kwargs["can_use_tool"] = _make_permission_callback(
-            self.project_root / ".claude" / "scripts"
+            [
+                self.project_root / ".claude" / "scripts",
+                self.project_root / ".claude" / "skills",
+            ]
         )
         if repo_dirs:
             options_kwargs["add_dirs"] = repo_dirs

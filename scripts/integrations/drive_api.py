@@ -1,8 +1,12 @@
 """
 Google Drive Direct Integration for Second Brain.
 
-Read-only access to Google Drive for finding files by name/type.
-Shares OAuth token with Gmail, Calendar, Sheets, and Docs.
+Find files by name/type, download them, upload into folders, and rename/move
+existing files. Shares the OAuth token with Gmail, Calendar, Sheets, and Docs.
+
+Rename/move need the full `drive` scope (config.py, 2026-09-12). Tokens issued
+under the older `drive.file` scope can still upload and download, but any
+files().update() on a file the app didn't create fails with 403.
 
 Usage:
     uv run python -m integrations.drive_api find "Content Calendar"
@@ -194,9 +198,7 @@ def upload_file(
     """
     Upload a local file into a Drive folder.
 
-    Requires the `drive.file` OAuth scope (added 2026-04-19 for invoice-router).
-    Only files this app creates via this function can later be managed by it —
-    that's the scope's intentional blast-radius limit.
+    Originally added 2026-04-19 for invoice-router under the `drive.file` scope.
 
     Args:
         local_path: Path to the file on disk.
@@ -231,6 +233,70 @@ def upload_file(
         .create(
             body=metadata,
             media_body=media,
+            fields="id, name, mimeType, webViewLink, modifiedTime, size, parents",
+            supportsAllDrives=True,
+        )
+        .execute()
+    )
+    return _parse_file(item)
+
+
+def download_file(file_id: str, local_path: str | Path) -> Path:
+    """Download a binary (non-Google-Docs) file from Drive to disk.
+
+    Works under the read-only scope — used by invoice-router to pull PDFs Jason
+    dropped into an expense folder by hand so the amount/date can be read.
+    """
+    import io
+
+    from googleapiclient.http import MediaIoBaseDownload  # type: ignore[import-untyped]
+
+    service = get_drive_service()
+    path = Path(local_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    buf = io.BytesIO()
+    downloader = MediaIoBaseDownload(buf, service.files().get_media(fileId=file_id))
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    path.write_bytes(buf.getvalue())
+    return path
+
+
+def rename_file(file_id: str, new_name: str) -> DriveFile:
+    """Rename a Drive file in place. Requires the full `drive` scope for files
+    the app didn't create."""
+    service = get_drive_service()
+    item: dict[str, Any] = with_retry(
+        lambda: service.files()
+        .update(
+            fileId=file_id,
+            body={"name": new_name},
+            fields="id, name, mimeType, webViewLink, modifiedTime, size, parents",
+            supportsAllDrives=True,
+        )
+        .execute()
+    )
+    return _parse_file(item)
+
+
+def move_file(file_id: str, new_parent_id: str) -> DriveFile:
+    """Move a Drive file into another folder (replaces all current parents).
+    Requires the full `drive` scope for files the app didn't create."""
+    service = get_drive_service()
+    current: dict[str, Any] = with_retry(
+        lambda: service.files()
+        .get(fileId=file_id, fields="parents", supportsAllDrives=True)
+        .execute()
+    )
+    previous = ",".join(current.get("parents", []))
+    item: dict[str, Any] = with_retry(
+        lambda: service.files()
+        .update(
+            fileId=file_id,
+            addParents=new_parent_id,
+            removeParents=previous or None,
             fields="id, name, mimeType, webViewLink, modifiedTime, size, parents",
             supportsAllDrives=True,
         )

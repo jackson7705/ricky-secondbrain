@@ -9,6 +9,9 @@ Daily flow:
   4. If not confident: queue into pending-clarification.json for Jason to
      resolve. His answer flows into vendor-memory.json so we don't ask twice.
 
+`file-now --drive ...` (2026-09-12) files PDFs Jason dropped into Drive by hand:
+reads amount/date from the PDF, renames to the standard convention, sheet-logs.
+
 The skill is intentionally conservative — when in doubt, ask rather than
 misfile a $500 invoice under "personal".
 """
@@ -757,7 +760,10 @@ def file_now(vendor: str, business: str, month_key: str, account: str | None = N
         try:
             emails = list_emails(
                 max_results=10, hours_ago=24 * 120,
-                query=f'in:inbox (receipt OR invoice OR payment) {vendor}',
+                # Not `in:inbox`: Gmail's Updates category / filters archive
+                # receipts without them ever hitting the inbox (Anthropic's
+                # 09-04 receipt had only UNREAD + CATEGORY_UPDATES).
+                query=f'-in:trash -in:spam (receipt OR invoice OR payment) {vendor}',
             )
         except Exception as e:
             print(_profile_error(profile, e))
@@ -773,6 +779,23 @@ def file_now(vendor: str, business: str, month_key: str, account: str | None = N
             if "email has changed" not in (e.subject or "").lower()
             and not (e.subject or "").lower().startswith(("fwd:",))
         ]
+        # Skip receipts already filed so a newer one in the next inbox isn't
+        # shadowed by an old one here (Anthropic bills both accounts; the
+        # growthpro copy from 09-08 was masking the locafy copy from 09-13).
+        already = [e for e in cands if e.id in state.get("processed_message_ids", [])]
+        cands = [e for e in cands if e.id not in state.get("processed_message_ids", [])]
+        if already and not cands:
+            print(f"  [already-filed] {already[0].subject!r} in {profile} — checking other inboxes")
+        # "[Vendor] is [Business] [Month]" means the receipt FROM that month. An
+        # older unfiled receipt must not get pulled into the wrong folder/tab
+        # (an Aug 13 Anthropic receipt landed in September this way on 09-13).
+        off_month = [e for e in cands if e.date and e.date.strftime("%Y-%m") != month_key]
+        cands = [e for e in cands if not (e.date and e.date.strftime("%Y-%m") != month_key)]
+        for e in off_month:
+            print(
+                f"  [not-in-month] {e.subject!r} is dated {e.date.strftime('%Y-%m-%d')} — "
+                f"file it with --month {e.date.strftime('%Y-%m')} if it's still owed"
+            )
         # Prefer a real billing sender (stripe/vendor) over a subject-only match,
         # then most recent.
         cands.sort(
@@ -788,12 +811,9 @@ def file_now(vendor: str, business: str, month_key: str, account: str | None = N
             break
 
     if not found:
-        print(f"  [not-found] no recent {vendor!r} receipt in {profiles}")
+        print(f"  [not-found] no unfiled {vendor!r} receipt in {profiles}")
         return 1
     profile, e = found
-    if e.id in state.get("processed_message_ids", []):
-        print(f"  [already-filed] {e.subject!r} was already processed — skipping")
-        return 0
 
     # Fetch the FULL message body — list_emails returns only a truncated snippet,
     # which made amounts like "$39.00" come back empty (filed as $0.00).
@@ -853,6 +873,278 @@ def file_now(vendor: str, business: str, month_key: str, account: str | None = N
     return 0
 
 
+# ── file-now from Drive ─────────────────────────────────────────────────
+#
+# Jason sometimes drops receipt PDFs straight into the month folder ("these
+# are in the folder for you") instead of forwarding the email. This path picks
+# them up from Drive: read the PDF for amount + date, rename to the standard
+# `YYYY-MM-DD — vendor — $X.XX.pdf` convention, move into the right month
+# folder if needed, and log the sheet row. Rename/move need the full `drive`
+# scope; under the old `drive.file` token they 403 and we still sheet-log.
+
+_NORMALIZED_NAME_RE = re.compile(r"^\d{4}-\d{2}-\d{2} — .+ — \$\d")
+_DRIVE_URL_ID_RE = re.compile(r"/d/([A-Za-z0-9_-]{20,})|[?&]id=([A-Za-z0-9_-]{20,})")
+
+_MONTH_NAMES = (
+    "january|february|march|april|may|june|july|august|september|october|november|december|"
+    "jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec"
+)
+# "September 12, 2026" | "12 Sep 2026" | "2026-09-12" | "09/12/2026"
+_DATE_RE = re.compile(
+    rf"(?P<mdy>(?P<m1>{_MONTH_NAMES})\.?\s+(?P<d1>\d{{1,2}}),?\s+(?P<y1>\d{{4}}))"
+    rf"|(?P<dmy>(?P<d2>\d{{1,2}})\s+(?P<m2>{_MONTH_NAMES})\.?,?\s+(?P<y2>\d{{4}}))"
+    r"|(?P<iso>(?P<y3>\d{4})-(?P<m3>\d{2})-(?P<d3>\d{2}))"
+    r"|(?P<us>(?P<m4>\d{1,2})/(?P<d4>\d{1,2})/(?P<y4>\d{4}))",
+    re.IGNORECASE,
+)
+# Labels that mark the date we actually want, most-specific first.
+_DATE_LABELS = ("date paid", "paid on", "payment date", "date of issue", "invoice date",
+                "receipt date", "issued", "billed on", "date")
+# Labels that mark the final amount, most-specific first.
+_AMOUNT_LABELS = ("amount paid", "total paid", "amount due", "grand total", "total charged",
+                  "total")
+
+
+def _drive_id_from_ref(ref: str) -> str:
+    """Accept a raw Drive file ID or any drive.google.com URL form."""
+    ref = ref.strip()
+    m = _DRIVE_URL_ID_RE.search(ref)
+    if m:
+        return m.group(1) or m.group(2)
+    return ref.rstrip("/").rsplit("/", 1)[-1]
+
+
+def _pdf_text(path: Path, max_pages: int = 3) -> str:
+    from pypdf import PdfReader
+
+    try:
+        reader = PdfReader(str(path))
+        return "\n".join((p.extract_text() or "") for p in reader.pages[:max_pages])
+    except Exception as exc:
+        print(f"  [warn] pdf text extraction failed for {path.name}: {exc}")
+        return ""
+
+
+def _parse_date_match(m: re.Match[str]) -> datetime | None:
+    try:
+        if m.group("mdy"):
+            return datetime.strptime(
+                f"{m.group('m1')[:3]} {m.group('d1')} {m.group('y1')}", "%b %d %Y"
+            )
+        if m.group("dmy"):
+            return datetime.strptime(
+                f"{m.group('m2')[:3]} {m.group('d2')} {m.group('y2')}", "%b %d %Y"
+            )
+        if m.group("iso"):
+            return datetime(int(m.group("y3")), int(m.group("m3")), int(m.group("d3")))
+        if m.group("us"):
+            return datetime(int(m.group("y4")), int(m.group("m4")), int(m.group("d4")))
+    except ValueError:
+        return None
+    return None
+
+
+def _extract_pdf_date(text: str, month_key: str) -> datetime | None:
+    """Best-effort receipt date. Labelled dates ("Date paid ...") win; otherwise
+    prefer any date inside the target month; otherwise the earliest date seen."""
+    low = text.lower()
+    for label in _DATE_LABELS:
+        for lm in re.finditer(re.escape(label) + r"\s*:?\s*", low):
+            dm = _DATE_RE.match(text, lm.end())
+            if dm and (parsed := _parse_date_match(dm)):
+                return parsed
+    found = [d for m in _DATE_RE.finditer(text) if (d := _parse_date_match(m))]
+    if not found:
+        return None
+    in_month = [d for d in found if d.strftime("%Y-%m") == month_key]
+    return min(in_month) if in_month else min(found)
+
+
+def _extract_pdf_amount(text: str) -> float | None:
+    """Labelled totals ("Amount paid $297.00") beat the generic largest-value
+    heuristic, which trips on things like a "$45 fee" notice in a travel receipt."""
+    low = text.lower()
+    money = r"\s*:?\s*(?:usd\s*)?\$?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{2})?|[0-9]+\.[0-9]{2})"
+    for label in _AMOUNT_LABELS:
+        m = re.search(re.escape(label) + money, low)
+        if m:
+            try:
+                val = float(m.group(1).replace(",", ""))
+            except ValueError:
+                continue
+            if 0.50 <= val <= 100_000:
+                return val
+    return _extract_amount(text)
+
+
+def _list_unfiled_pdfs_in_folder(folder_id: str, vendor: str, processed: set[str]) -> list[Any]:
+    """PDFs in a month folder that haven't been normalized or filed yet.
+    Filename matches on the vendor sort first; the rest get checked against
+    the PDF text after download."""
+    from integrations.drive_api import list_files
+
+    vlow = vendor.lower()
+    out = []
+    for f in list_files(file_type="pdf", folder_id=folder_id, max_results=100):
+        if f.id in processed or _NORMALIZED_NAME_RE.match(f.name):
+            continue
+        out.append((vlow in f.name.lower(), f))
+    out.sort(key=lambda t: t[0], reverse=True)
+    return [f for _, f in out]
+
+
+def file_now_from_drive(
+    vendor: str,
+    business: str,
+    month_key: str,
+    refs: list[str],
+    amount_override: float | None = None,
+    no_sheet: bool = False,
+    dry_run: bool = False,
+    force: bool = False,
+) -> int:
+    """File receipt PDFs that already live in Drive (see section comment above).
+
+    `refs` is a list of Drive file IDs/URLs, or the single word "folder" to
+    sweep the business's month folder for unfiled PDFs matching the vendor.
+    `--no-sheet` is for PDFs whose sheet row already exists (rename/move only).
+    """
+    from googleapiclient.errors import HttpError  # type: ignore[import-untyped]
+
+    from integrations.drive_api import download_file, get_file_by_id, move_file, rename_file
+
+    state = _load_state()
+    vendor_memory = _load_vendor_memory()
+    pending = _load_pending()
+    vlow = vendor.strip().lower()
+    processed = set(state.setdefault("processed_drive_ids", []))
+    if business not in ("locafy", "wonderly"):
+        print(f"  [error] unknown business {business!r} — expected locafy|wonderly")
+        return 1
+
+    _set_profile("growthpro")  # expense folders live in the growthpro drive
+    folder_id = _ensure_month_folder(business, month_key)
+
+    sweep = len(refs) == 1 and refs[0].lower() == "folder"
+    if sweep:
+        files = _list_unfiled_pdfs_in_folder(folder_id, vlow, processed)
+        if not files:
+            print(f"  [not-found] no unfiled PDFs in {business}/{month_key} folder")
+            return 1
+    else:
+        files = []
+        for ref in refs:
+            fid = _drive_id_from_ref(ref)
+            f = get_file_by_id(fid)
+            if not f:
+                print(f"  [not-found] Drive file {fid} — check the link/ID and sharing")
+                continue
+            if f.mime_type != "application/pdf":
+                print(f"  [skip] {f.name!r} is {f.mime_type}, not a PDF")
+                continue
+            files.append(f)
+    if not files:
+        return 1
+
+    filed = 0
+    scope_warned = False
+    for f in files:
+        if f.id in processed and not force:
+            print(f"  [already-filed] {f.name!r} — skipping (pass --force to redo)")
+            continue
+
+        local = download_file(f.id, STAGING_DIR / f"drive_{f.id}.pdf")
+        text = _pdf_text(local)
+        if sweep and vlow not in f.name.lower() and vlow not in text.lower():
+            continue  # sweep mode: this PDF isn't the vendor we were asked about
+
+        amount = amount_override
+        if amount is None:
+            amount = _extract_pdf_amount(text) or 0.0
+        when = _extract_pdf_date(text, month_key) or f.modified_time or datetime.now(timezone.utc)
+        display_name = f"{when.strftime('%Y-%m-%d')} — {vlow} — ${amount:.2f}.pdf"
+        needs_move = f.parent_id != folder_id
+        use = vendor_memory.get(vlow, {}).get("use", "")
+
+        if dry_run:
+            print(
+                f"  [dry-run] {f.name!r} → {display_name!r}"
+                + (" (move to month folder)" if needs_move else "")
+                + (
+                    " (no sheet row)" if no_sheet
+                    else f" + sheet row {vendor.title()} ${amount:.2f}"
+                )
+            )
+            continue
+
+        url = f.url
+        renamed = True
+        try:
+            if f.name != display_name:
+                rename_file(f.id, display_name)
+            if needs_move:
+                move_file(f.id, folder_id)
+        except HttpError as exc:
+            if exc.resp.status not in (403, 404):
+                raise
+            renamed = False
+            if not scope_warned:
+                print(
+                    "  [warn] Drive refused rename/move — the growthpro token predates the full "
+                    "`drive` scope. Re-auth: "
+                    "`uv run python reconnect_google.py begin --account growthpro`."
+                )
+                scope_warned = True
+            if no_sheet:
+                # Nothing else to do for this file; leave it unprocessed so a
+                # plain re-run after re-auth picks it up.
+                print(f"  [skipped] {f.name!r} left as-is — re-run after re-auth")
+                continue
+            print(
+                f"  [warn] sheet row will still be written; finish the rename later with "
+                f"`file-now --vendor {vlow} --business {business} --month {month_key} "
+                f"--drive {f.id} --no-sheet --force`"
+            )
+
+        if not no_sheet:
+            _append_to_expense_sheet(
+                business, month_key, vendor.title(), use or "(filed)", amount, url
+            )
+
+        if vlow and vlow not in vendor_memory:
+            vendor_memory[vlow] = {"business": business, "use": use, "confidence": 0.9,
+                                   "learned_from": f"drive:{f.id}"}
+        processed.add(f.id)
+        now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        pending.append({
+            "message_id": f"drive:{f.id}", "thread_id": "", "profile": "growthpro",
+            "subject": f.name, "sender_email": "", "received_at": when.isoformat(),
+            "guess_vendor": vlow, "guess_business": business, "guess_use": use,
+            "guess_amount": amount, "proposed_month": month_key,
+            "proposed_folder": f"{business.title()} Expenses / {month_key}",
+            "confidence": 1.0, "reasons": ["file-now: filed from Drive"],
+            "queued_at": now_iso, "status": "applied", "vendor": vendor.title(),
+            "business": business, "use": use, "amount": amount,
+            "applied_drive_id": f.id, "applied_at": now_iso,
+            "sheet_logged": not no_sheet, "renamed": renamed,
+        })
+        filed += 1
+        print(f"  [filed] {business}/{month_key} — {vendor} ${amount:.2f} ({display_name}) → {url}")
+        if amount == 0.0:
+            print("  [warn] amount not found in PDF — pass --amount to fix the sheet row")
+
+    if dry_run:
+        return 0
+    state["processed_drive_ids"] = sorted(processed)
+    _save_json(STATE_FILE, state)
+    _save_json(PENDING_CLARIFICATION_FILE, pending)
+    _save_json(VENDOR_MEMORY_FILE, vendor_memory)
+    if filed == 0:
+        print(f"  [not-found] no {vendor!r} PDFs to file")
+        return 1
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -878,11 +1170,32 @@ def main() -> int:
     fn.add_argument("--business", required=True, help="locafy | wonderly")
     fn.add_argument("--month", required=True, help="YYYY-MM, e.g. 2026-06")
     fn.add_argument("--account", default=None, help="Limit to one inbox profile (growthpro|locafy|wonderly)")
+    fn.add_argument(
+        "--drive", nargs="+", default=None, metavar="ID_OR_URL",
+        help=(
+            "File from Drive instead of Gmail: one or more Drive file IDs/URLs, or the word "
+            "'folder' to sweep the month folder for unfiled PDFs matching the vendor."
+        ),
+    )
+    fn.add_argument("--amount", type=float, default=None,
+                    help="(--drive only) override the amount instead of reading it from the PDF")
+    fn.add_argument("--no-sheet", action="store_true",
+                    help="(--drive only) rename/move the PDF but don't add a sheet row")
+    fn.add_argument("--dry-run", action="store_true",
+                    help="(--drive only) show what would happen without touching Drive/Sheets")
+    fn.add_argument("--force", action="store_true",
+                    help="(--drive only) redo a file already in processed_drive_ids")
 
     args = parser.parse_args()
     if args.cmd == "apply":
         return run_apply()
     if args.cmd == "file-now":
+        if args.drive:
+            return file_now_from_drive(
+                args.vendor, args.business, args.month, args.drive,
+                amount_override=args.amount, no_sheet=args.no_sheet, dry_run=args.dry_run,
+                force=args.force,
+            )
         return file_now(args.vendor, args.business, args.month, args.account)
     # default to scan
     hours = getattr(args, "hours", DEFAULT_LOOKBACK_HOURS)

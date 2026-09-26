@@ -25,7 +25,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 FATHOM_BASE = "https://api.fathom.ai/external/v1"
 DATA = Path(__file__).resolve().parent.parent / "data" / "state"
 STATE = DATA / "fathom-sweep-state.json"
-from config import CLICKUP_INBOX_LIST_ID as INBOX_LIST_ID  # noqa: E402
+from config import CLICKUP_PERSONAL_LIST_ID as INBOX_LIST_ID  # noqa: E402
 from config import CLICKUP_OWNER_UID as OWNER_UID  # noqa: E402
 from config import OWNER_EMAILS  # noqa: E402
 LOOKBACK_DAYS = 3
@@ -63,8 +63,9 @@ def _is_dupe(title: str, existing: list[str], sigs: set[str]) -> bool:
     n = _norm(title)
     if n in sigs:
         return True
+    # fuzzy against created signatures too (Redis mirror lags by hours)
     return any(difflib.SequenceMatcher(None, n, name).ratio() >= 0.72 or n in name or name in n
-               for name in existing)
+               for name in list(existing) + list(sigs))
 
 
 def _load_state() -> dict:
@@ -109,6 +110,11 @@ def main(dry_run: bool) -> int:
                           "url": a.get("recording_playback_url") or "", "assignee": name})
 
     existing = _existing_task_names()
+    try:  # live names from the Personal List (open + closed) -- mirror lags
+        from integrations.clickup_api import list_task_names
+        existing = list(set(existing) | set(list_task_names(INBOX_LIST_ID)))
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [warn] live ClickUp dedup unavailable: {str(exc)[:80]}")
     fresh = [it for it in items if not _is_dupe(it["desc"], existing, sigs)]
     print(f"pulled {len(items)} open action item(s) from meetings (last {LOOKBACK_DAYS}d); "
           f"{len(fresh)} new after dedup:\n")
@@ -151,7 +157,7 @@ def _report(created: list[dict]) -> None:
     lines = [f"🎙️ Meeting action items — filed {len(created)} task(s) from Fathom:"]
     for it in created:
         lines.append(f"• {it['desc'][:80]} ({it['meeting'][:30]})")
-    lines.append("\nAll in your ClickUp Inbox. Reply if any shouldn't be there.")
+    lines.append("\nAll in your ClickUp Personal List. Reply if any shouldn't be there.")
     notify_owner("\n".join(lines)[:1400])
 
 

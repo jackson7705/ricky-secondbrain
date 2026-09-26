@@ -20,7 +20,8 @@ SENSITIVE_FILE_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\.pem$", re.IGNORECASE),                 # SSL/TLS certificates
     re.compile(r"\.key$", re.IGNORECASE),                 # Private keys
     re.compile(r"google_credentials\.json", re.IGNORECASE),  # OAuth client secret
-    re.compile(r"google_token\.json", re.IGNORECASE),     # OAuth refresh token
+    re.compile(r"google_token\w*\.json", re.IGNORECASE),  # OAuth refresh token (incl. per-profile files)
+    re.compile(r"\.pending_oauth_", re.IGNORECASE),        # PKCE verifier parked between reconnect_google.py steps
     re.compile(r"credentials\.json", re.IGNORECASE),      # Generic credentials
     re.compile(r"\.credentials\.json", re.IGNORECASE),    # Claude credentials
     re.compile(r"master\.env", re.IGNORECASE),            # Master env file
@@ -66,46 +67,50 @@ def is_sensitive_file(path: str) -> str | None:
 
 
 # --- Dangerous bash patterns for env/secret exposure ---
+#
+# Matched per simple command (split on ; && || | and newlines, here-doc bodies
+# removed) rather than against the whole normalized command string. Before
+# 2026-09-13 every `.*` could span pipes, heredoc bodies, and quoted Python
+# source, so a heredoc that merely *mentioned* "credentials" in a docstring
+# blocked, and `echo "== $q"` blocked because "oauth" appeared 300 chars later.
+#
+# `_ARG` = "somewhere in this command's argument list". Keeps the rule attached
+# to the command's own arguments instead of anything that follows.
+_ARG = r"(?:\s+\S+)*?\s+\S*"
+# A shell variable whose *name* looks like a secret ($API_KEY, ${TOKEN}, $OAUTH_X).
+_SECRET_VAR = r"\$\{?[A-Za-z_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH)[A-Za-z0-9_]*"
+
 DANGEROUS_BASH_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    # Direct .env file reads
-    (re.compile(r"\bcat\b.*\.env\b", re.IGNORECASE), "Reading .env file with cat"),
-    (re.compile(r"\bhead\b.*\.env\b", re.IGNORECASE), "Reading .env file with head"),
-    (re.compile(r"\btail\b.*\.env\b", re.IGNORECASE), "Reading .env file with tail"),
-    (re.compile(r"\bless\b.*\.env\b", re.IGNORECASE), "Reading .env file with less"),
-    (re.compile(r"\bmore\b.*\.env\b", re.IGNORECASE), "Reading .env file with more"),
-    (re.compile(r"\btype\b.*\.env\b", re.IGNORECASE), "Reading .env file with type"),
-    (re.compile(r"\bbat\b.*\.env\b", re.IGNORECASE), "Reading .env file with bat"),
-    (re.compile(r"\bvi\b.*\.env\b", re.IGNORECASE), "Opening .env file in editor"),
-    (re.compile(r"\bvim\b.*\.env\b", re.IGNORECASE), "Opening .env file in editor"),
-    (re.compile(r"\bnano\b.*\.env\b", re.IGNORECASE), "Opening .env file in editor"),
-    (re.compile(r"\bcode\b.*\.env\b", re.IGNORECASE), "Opening .env file in editor"),
-    (re.compile(r"\bsource\b.*\.env\b", re.IGNORECASE), "Sourcing .env file"),
-    (re.compile(r"\.\s+.*\.env\b", re.IGNORECASE), "Sourcing .env with dot notation"),
+    # Direct env-file reads / opens
+    (re.compile(r"\b(?:cat|head|tail|less|more|type|bat)\b" + _ARG + r"\.env\b", re.IGNORECASE),
+     "Reading env file"),
+    (re.compile(r"\b(?:vi|vim|nano|code)\b" + _ARG + r"\.env\b", re.IGNORECASE),
+     "Opening env file in editor"),
+    (re.compile(r"\bsource\s+\S*\.env\b", re.IGNORECASE), "Sourcing env file"),
+    (re.compile(r"^\.\s+\S*\.env\b", re.IGNORECASE), "Sourcing env file with dot notation"),
 
     # Credential file reads
-    (re.compile(r"\bcat\b.*credentials", re.IGNORECASE), "Reading credentials file"),
-    (re.compile(r"\bcat\b.*google_token", re.IGNORECASE), "Reading Google token file"),
-    (re.compile(r"\bcat\b.*\.pem\b", re.IGNORECASE), "Reading certificate file"),
-    (re.compile(r"\bcat\b.*\.key\b", re.IGNORECASE), "Reading key file"),
-    (re.compile(r"\bcat\b.*id_rsa", re.IGNORECASE), "Reading SSH private key"),
-    (re.compile(r"\bcat\b.*id_ed25519", re.IGNORECASE), "Reading SSH private key"),
-    (re.compile(r"\bcat\b.*\.ssh/", re.IGNORECASE), "Reading SSH directory file"),
-    (re.compile(r"\bcat\b.*master\.env", re.IGNORECASE), "Reading master env file"),
+    (re.compile(r"\bcat\b" + _ARG + r"credentials", re.IGNORECASE), "Reading credentials file"),
+    (re.compile(r"\bcat\b" + _ARG + r"google_token", re.IGNORECASE), "Reading Google token file"),
+    (re.compile(r"\bcat\b" + _ARG + r"\.pending_oauth_", re.IGNORECASE), "Reading pending OAuth state"),
+    (re.compile(r"\bcat\b" + _ARG + r"\.pem\b", re.IGNORECASE), "Reading certificate file"),
+    (re.compile(r"\bcat\b" + _ARG + r"\.key\b", re.IGNORECASE), "Reading key file"),
+    (re.compile(r"\bcat\b" + _ARG + r"id_rsa", re.IGNORECASE), "Reading SSH private key"),
+    (re.compile(r"\bcat\b" + _ARG + r"id_ed25519", re.IGNORECASE), "Reading SSH private key"),
+    (re.compile(r"\bcat\b" + _ARG + r"\.ssh/", re.IGNORECASE), "Reading SSH directory file"),
+    (re.compile(r"\bcat\b" + _ARG + r"master\.env", re.IGNORECASE), "Reading master env file"),
 
     # Environment variable printing
     (re.compile(r"\bprintenv\b", re.IGNORECASE), "Printing environment variables"),
-    (re.compile(r"\benv\b\s*$", re.IGNORECASE), "Listing all environment variables"),
-    (re.compile(r"\benv\b\s*\|", re.IGNORECASE), "Piping environment variables"),
-    (re.compile(r"\bset\b\s*\|", re.IGNORECASE), "Piping shell variables"),
+    (re.compile(r"^env\s*$", re.IGNORECASE), "Listing all environment variables"),
+    (re.compile(r"^set\s*$", re.IGNORECASE), "Listing shell variables"),
     (re.compile(r"\bexport\s+-p\b", re.IGNORECASE), "Listing exported variables"),
     (re.compile(r"\bdeclare\s+-x\b", re.IGNORECASE), "Listing exported variables"),
     (re.compile(r"\bcompgen\s+-v\b", re.IGNORECASE), "Listing all variable names"),
 
-    # Echo/printf of specific secret-like variables
-    (re.compile(r"\becho\b.*\$.*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|API_KEY|ACCESS_TOKEN|AUTH)", re.IGNORECASE),
-     "Echoing secret environment variable"),
-    (re.compile(r"\bprintf\b.*\$.*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|API_KEY|ACCESS_TOKEN|AUTH)", re.IGNORECASE),
-     "Printf of secret environment variable"),
+    # Echo/printf of a secret-named variable
+    (re.compile(r"\becho\b.*" + _SECRET_VAR, re.IGNORECASE), "Echoing secret environment variable"),
+    (re.compile(r"\bprintf\b.*" + _SECRET_VAR, re.IGNORECASE), "Printf of secret environment variable"),
 
     # Python inline execution that accesses env vars
     (re.compile(r"python[3]?\s+-c\s+.*os\.environ", re.IGNORECASE),
@@ -114,112 +119,191 @@ DANGEROUS_BASH_PATTERNS: list[tuple[re.Pattern[str], str]] = [
      "Python inline code accessing os.getenv"),
     (re.compile(r"python[3]?\s+-c\s+.*dotenv", re.IGNORECASE),
      "Python inline code loading dotenv"),
-    (re.compile(r"python[3]?\s+-c\s+.*\.env", re.IGNORECASE),
-     "Python inline code referencing .env"),
-    (re.compile(r"python[3]?\s+-c\s+.*open\(.*\.env", re.IGNORECASE),
-     "Python inline code opening .env"),
+    (re.compile(r"python[3]?\s+-c\s+.*\.env\b", re.IGNORECASE),
+     "Python inline code referencing env file"),
 
-    # Node inline execution
+    # Node / other interpreters, inline
     (re.compile(r"node\s+-e\s+.*process\.env", re.IGNORECASE),
      "Node inline code accessing process.env"),
-
-    # Other interpreter inline execution
-    (re.compile(r"\bruby\s+-e\b.*ENV", re.IGNORECASE),
-     "Ruby inline code accessing ENV"),
-    (re.compile(r"\bperl\s+-e\b.*ENV", re.IGNORECASE),
-     "Perl inline code accessing %ENV"),
-    (re.compile(r"\bphp\s+-r\b.*getenv", re.IGNORECASE),
-     "PHP inline code accessing getenv"),
+    (re.compile(r"\bruby\s+-e\b.*ENV", re.IGNORECASE), "Ruby inline code accessing ENV"),
+    (re.compile(r"\bperl\s+-e\b.*ENV", re.IGNORECASE), "Perl inline code accessing %ENV"),
+    (re.compile(r"\bphp\s+-r\b.*getenv", re.IGNORECASE), "PHP inline code accessing getenv"),
 
     # Grep/search targeting sensitive files
-    (re.compile(r"\bgrep\b.*\.env\b", re.IGNORECASE), "Grep searching .env file"),
-    (re.compile(r"\brg\b.*\.env\b", re.IGNORECASE), "Ripgrep searching .env file"),
-    (re.compile(r"\bfind\b.*\.env\b", re.IGNORECASE), "Find searching for .env files"),
-    (re.compile(r"\bfind\b.*-exec\b.*cat", re.IGNORECASE), "Find with exec cat (potential .env read)"),
+    (re.compile(r"\b(?:grep|rg)\b" + _ARG + r"\.env\b", re.IGNORECASE), "Searching env file"),
+    (re.compile(r"\bfind\b" + _ARG + r"\.env\b", re.IGNORECASE), "Find searching for env files"),
+    (re.compile(r"\bfind\b.*-exec\b.*cat", re.IGNORECASE), "Find with exec cat (potential env read)"),
 
-    # Wildcard bypass: cat .en* or cat .e?? could match .env
-    (re.compile(r"\bcat\b.*\.en\*", re.IGNORECASE), "Wildcard read that could match .env"),
-    (re.compile(r"\bcat\b.*\.e\?\?", re.IGNORECASE), "Wildcard read that could match .env"),
-    (re.compile(r"\bcat\b.*\.e\[", re.IGNORECASE), "Glob pattern read that could match .env"),
+    # Wildcard / expansion bypasses: cat .en*  cat .e??  cat .e[n]  cat .e$X  cat .e\nv
+    (re.compile(r"\bcat\b" + _ARG + r"\.en\*", re.IGNORECASE), "Wildcard read that could match env file"),
+    (re.compile(r"\bcat\b" + _ARG + r"\.e\?\?", re.IGNORECASE), "Wildcard read that could match env file"),
+    (re.compile(r"\bcat\b" + _ARG + r"\.e\[", re.IGNORECASE), "Glob read that could match env file"),
+    (re.compile(r"\bcat\b" + _ARG + r"\.e\$", re.IGNORECASE), "Variable expansion bypass targeting env file"),
+    (re.compile(r"\bcat\b" + _ARG + r"\.e\\", re.IGNORECASE), "Backslash bypass targeting env file"),
 
-    # Symlink creation targeting sensitive files
-    (re.compile(r"\bln\b.*-s.*\.env\b", re.IGNORECASE), "Creating symlink to .env file"),
+    # Symlink / copy of sensitive files
+    (re.compile(r"\bln\b.*-s.*\.env\b", re.IGNORECASE), "Creating symlink to env file"),
     (re.compile(r"\bln\b.*-s.*credentials", re.IGNORECASE), "Creating symlink to credentials"),
     (re.compile(r"\bln\b.*-s.*google_token", re.IGNORECASE), "Creating symlink to token file"),
-    (re.compile(r"\bcp\b.*\.env\b", re.IGNORECASE), "Copying .env file"),
+    (re.compile(r"\bcp\b" + _ARG + r"\.env\b", re.IGNORECASE), "Copying env file"),
 
-    # Here-doc/here-string execution with env access
-    (re.compile(r"python[3]?\s*<<", re.IGNORECASE),
-     "Python here-doc execution (could access env vars)"),
-    (re.compile(r"\bperl\b\s*<<", re.IGNORECASE),
-     "Perl here-doc execution (could access env vars)"),
-    (re.compile(r"\bruby\b\s*<<", re.IGNORECASE),
-     "Ruby here-doc execution (could access env vars)"),
+    # Interpreter here-docs are checked by body (see check_bash_command); the
+    # bare `python <<` form is still refused outright because its body is the
+    # program and could do anything.
+    (re.compile(r"\b(?:python[3]?|perl|ruby)\s*<<", re.IGNORECASE),
+     "Interpreter here-doc execution (use `python3 - <<` so the body can be inspected)"),
 
-    # Base64 decoding piped to execution (common bypass technique)
+    # Base64 decoding piped to execution
     (re.compile(r"base64\s+(-d|--decode).*\|\s*(sh|bash|zsh|python|ruby|perl|node)", re.IGNORECASE),
      "Base64 decoded command piped to interpreter"),
-    (re.compile(r"bash\s*<<<.*base64", re.IGNORECASE),
-     "Base64 here-string piped to bash"),
+    (re.compile(r"bash\s*<<<.*base64", re.IGNORECASE), "Base64 here-string piped to bash"),
 
-    # Variable expansion bypass: cat .e${IFS}nv, cat .e$()nv
-    (re.compile(r"\bcat\b.*\.e\$", re.IGNORECASE), "Variable expansion bypass targeting .env"),
-    (re.compile(r"\bcat\b.*\.e\\", re.IGNORECASE), "Backslash bypass targeting .env"),
-
-    # Eval with env/secret references (not all eval - ssh-agent etc. are legitimate)
-    (re.compile(r"\beval\b.*\.env", re.IGNORECASE), "Eval referencing .env file"),
-    (re.compile(r"\beval\b.*\$.*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)", re.IGNORECASE),
-     "Eval referencing secret variable"),
+    # Eval with env/secret references
+    (re.compile(r"\beval\b.*\.env\b", re.IGNORECASE), "Eval referencing env file"),
+    (re.compile(r"\beval\b.*" + _SECRET_VAR, re.IGNORECASE), "Eval referencing secret variable"),
     (re.compile(r"\beval\b.*os\.environ", re.IGNORECASE), "Eval accessing os.environ"),
     (re.compile(r"\bexec\b\s+\d*[<>]", re.IGNORECASE), "Exec with file descriptor redirect"),
 
-    # Curl/wget exfiltration of env data
-    (re.compile(r"\bcurl\b.*\$.*(?:KEY|TOKEN|SECRET|PASSWORD)", re.IGNORECASE),
-     "Curl with secret variable in URL/data"),
-    (re.compile(r"\bwget\b.*\$.*(?:KEY|TOKEN|SECRET|PASSWORD)", re.IGNORECASE),
-     "Wget with secret variable in URL/data"),
-    # Broader exfiltration: curl/wget posting file contents
-    (re.compile(r"\bcurl\b.*-d\s*@.*\.env", re.IGNORECASE),
-     "Curl posting .env file contents"),
-    (re.compile(r"\bcurl\b.*--data.*\.env", re.IGNORECASE),
-     "Curl posting .env file contents"),
+    # Curl/wget exfiltration
+    (re.compile(r"\b(?:curl|wget)\b.*" + _SECRET_VAR, re.IGNORECASE),
+     "Curl/wget with secret variable in URL/data"),
+    (re.compile(r"\bcurl\b.*(?:-d\s*@|--data).*\.env", re.IGNORECASE),
+     "Curl posting env file contents"),
 
-    # Process substitution reading sensitive files
-    (re.compile(r"<\(.*cat.*\.env", re.IGNORECASE), "Process substitution reading .env"),
-    (re.compile(r"<\(.*\.env", re.IGNORECASE), "Process substitution referencing .env"),
-
-    # xxd/hexdump of sensitive files (binary dump to bypass text filters)
-    (re.compile(r"\bxxd\b.*\.env", re.IGNORECASE), "Hex dump of .env file"),
-    (re.compile(r"\bhexdump\b.*\.env", re.IGNORECASE), "Hex dump of .env file"),
-    (re.compile(r"\bod\b.*\.env", re.IGNORECASE), "Octal dump of .env file"),
+    # Process substitution / hex dumps of sensitive files
+    (re.compile(r"<\(.*\.env", re.IGNORECASE), "Process substitution referencing env file"),
+    (re.compile(r"\b(?:xxd|hexdump|od)\b" + _ARG + r"\.env", re.IGNORECASE), "Hex dump of env file"),
 
     # xargs execution that could target sensitive files
-    (re.compile(r"\bxargs\b.*cat", re.IGNORECASE), "xargs with cat (potential .env read)"),
+    (re.compile(r"\bxargs\b.*cat", re.IGNORECASE), "xargs with cat (potential env read)"),
 ]
 
 
-def check_bash_command(command: str) -> str | None:
-    """Check if a bash command would expose secrets. Returns the reason or None."""
-    # Normalize: collapse whitespace, strip
-    normalized = " ".join(command.split()).strip()
+_HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+# Rules that legitimately span a pipe (the danger *is* the pipe), checked
+# against the whole shell text after here-doc bodies are removed.
+CROSS_SEGMENT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"base64\s+(-d|--decode).*\|\s*(sh|bash|zsh|python|ruby|perl|node)", re.IGNORECASE),
+     "Base64 decoded command piped to interpreter"),
+    (re.compile(r"\bxargs\b.*cat", re.IGNORECASE), "xargs with cat (potential env read)"),
+    (re.compile(r"\bfind\b.*-exec\b.*cat", re.IGNORECASE), "Find with exec cat (potential env read)"),
+]
 
-    for pattern, reason in DANGEROUS_BASH_PATTERNS:
-        if pattern.search(normalized):
+
+def _split_segments(shell_text: str) -> list[str]:
+    """Split shell text into simple commands on ; | || && and newlines,
+    ignoring separators inside single or double quotes so
+    `python3 -c "import os; print(x)"` stays one command."""
+    segments: list[str] = []
+    buf: list[str] = []
+    quote: str | None = None
+    i = 0
+    n = len(shell_text)
+    while i < n:
+        ch = shell_text[i]
+        if quote:
+            buf.append(ch)
+            if ch == quote and (quote == "'" or shell_text[i - 1] != "\\"):
+                quote = None
+            i += 1
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == "#" and (i == 0 or shell_text[i - 1].isspace()):
+            # Unquoted comment: never executes, skip to end of line.
+            while i < n and shell_text[i] != "\n":
+                i += 1
+            continue
+        two = shell_text[i : i + 2]
+        if two in ("||", "&&"):
+            segments.append("".join(buf))
+            buf = []
+            i += 2
+            continue
+        if ch in (";", "|", "\n"):
+            segments.append("".join(buf))
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    segments.append("".join(buf))
+    return segments
+_SHELL_HEREDOC_CMD_RE = re.compile(r"\b(?:bash|sh|zsh|ksh|dash)\b")
+
+
+def _split_heredocs(command: str) -> tuple[str, list[tuple[str, str]]]:
+    """Separate here-doc bodies from the shell text that introduces them.
+
+    Returns (shell_text_without_bodies, [(introducing_line, body), ...]).
+    A body runs from the line after `<<DELIM` to the line equal to DELIM.
+    """
+    lines = command.split("\n")
+    shell_lines: list[str] = []
+    bodies: list[tuple[str, str]] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        shell_lines.append(line)
+        i += 1
+        m = _HEREDOC_RE.search(line)
+        if not m:
+            continue
+        delim = m.group(2)
+        body: list[str] = []
+        while i < len(lines) and lines[i].strip() != delim:
+            body.append(lines[i])
+            i += 1
+        i += 1  # skip the delimiter line
+        bodies.append((line, "\n".join(body)))
+    return "\n".join(shell_lines), bodies
+
+
+def check_bash_command(command: str, _depth: int = 0) -> str | None:
+    """Check if a bash command would expose secrets. Returns the reason or None.
+
+    Shell text is checked one simple command at a time so a pattern's `.*`
+    can't reach across a pipe or into an unrelated argument. Here-doc bodies
+    are checked as *content*: bodies fed to a shell are re-checked as shell,
+    everything else (Python source, file contents) goes through the same
+    exfiltration patterns used for Write/Edit. Mentioning a secret filename in
+    a docstring is fine; printing its contents is not.
+    """
+    if _depth > 4:
+        return None
+    shell_text, bodies = _split_heredocs(command)
+
+    whole = " ".join(shell_text.split()).strip()
+    for pattern, reason in CROSS_SEGMENT_PATTERNS:
+        if pattern.search(whole):
             return f"Blocked: {reason}"
 
-    # Also check for subshell content: $(...) and `...`
-    # Extract subshell commands and check them recursively
-    subshell_patterns = [
-        re.compile(r"\$\((.*?)\)", re.DOTALL),   # $(...)
-        re.compile(r"`(.*?)`", re.DOTALL),         # `...`
-    ]
-    for sp in subshell_patterns:
-        for match in sp.finditer(normalized):
-            inner = match.group(1)
-            result = check_bash_command(inner)
-            if result:
-                return f"{result} (inside subshell)"
+    for segment in _split_segments(shell_text):
+        seg = " ".join(segment.split()).strip()
+        if not seg:
+            continue
+        for pattern, reason in DANGEROUS_BASH_PATTERNS:
+            if pattern.search(seg):
+                return f"Blocked: {reason}"
+        # Subshell content: $(...) and `...`
+        for sp in (re.compile(r"\$\((.*?)\)", re.DOTALL), re.compile(r"`(.*?)`", re.DOTALL)):
+            for match in sp.finditer(seg):
+                result = check_bash_command(match.group(1), _depth + 1)
+                if result:
+                    return f"{result} (inside subshell)"
 
+    for intro, body in bodies:
+        if _SHELL_HEREDOC_CMD_RE.search(intro):
+            result = check_bash_command(body, _depth + 1)
+            if result:
+                return f"{result} (inside here-doc)"
+        else:
+            result = check_written_content(body)
+            if result:
+                return result.replace("writing scripts", "here-doc scripts")
     return None
 
 
@@ -244,10 +328,14 @@ EXFILTRATION_CONTENT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
     # Python: reading .env and printing
     (re.compile(r"open\s*\(.*\.env.*\).*read\(\)", re.IGNORECASE),
-     "Script reads .env file contents"),
+     "Script reads env file contents"),
+    (re.compile(r"open\s*\(.*(?:_token\w*\.json|credentials\.json).*\).*read\(\)", re.IGNORECASE),
+     "Script reads token/credential file contents"),
+    (re.compile(r"(?:_token\w*\.json|credentials\.json)[^\n]*read_text\(\)[^\n]*print", re.IGNORECASE),
+     "Script prints token/credential file contents"),
 
     # Bash script: cat/echo env vars
-    (re.compile(r"cat\s+.*\.env", re.IGNORECASE),
+    (re.compile(r"\bcat\b(?:\s+\S+)*?\s+\S*\.env\b", re.IGNORECASE),
      "Script cats .env file"),
     (re.compile(r"echo\s+\$\{?[A-Z_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)", re.IGNORECASE),
      "Script echoes secret variable"),

@@ -27,7 +27,7 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 STATE = Path(__file__).resolve().parent.parent / "data" / "state" / "loose-ends-state.json"
-from config import CLICKUP_INBOX_LIST_ID as INBOX_LIST_ID  # noqa: E402
+from config import CLICKUP_PERSONAL_LIST_ID as INBOX_LIST_ID  # noqa: E402
 from config import CLICKUP_OWNER_UID as OWNER_UID  # noqa: E402
 ACCOUNTS = ["growthpro", "locafy"]
 LOOKBACK_HOURS = 48
@@ -134,7 +134,9 @@ def _is_dupe(title: str, existing: list[str], sigs: set[str]) -> bool:
     n = _norm(title)
     if n in sigs:
         return True
-    for name in existing:
+    # fuzzy against our own created signatures too -- the Redis mirror lags by
+    # hours, so a same-day re-phrasing of something we already filed must match here
+    for name in list(existing) + list(sigs):
         if difflib.SequenceMatcher(None, n, name).ratio() >= 0.72 or n in name or name in n:
             return True
     return False
@@ -148,6 +150,11 @@ def main(dry_run: bool) -> int:
     print(f"scanned {len(emails)} new inbox emails ({', '.join(ACCOUNTS)}, last {LOOKBACK_HOURS}h)")
     items = _extract(emails)
     existing = _existing_task_names()
+    try:  # live names from the Personal List (open + closed) -- mirror lags
+        from integrations.clickup_api import list_task_names
+        existing = list(set(existing) | set(list_task_names(INBOX_LIST_ID)))
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [warn] live ClickUp dedup unavailable: {str(exc)[:80]}")
 
     fresh = []
     for it in items:
@@ -189,7 +196,7 @@ def main(dry_run: bool) -> int:
     st["last_run"] = datetime.now().isoformat(timespec="seconds")
     _save_state(st)
 
-    print(f"\ncreated {len(created)} ClickUp task(s) in the Inbox list")
+    print(f"\ncreated {len(created)} ClickUp task(s) in the Personal List")
     if created:
         _report(created)
     return 0
@@ -201,7 +208,7 @@ def _report(created: list) -> None:
     for it, _t in created:
         due = f" (due {it['due']})" if it.get("due") else ""
         lines.append(f"• {it['title']}{due}")
-    lines.append("\nAll in your ClickUp Inbox list. Reply if any shouldn't be there.")
+    lines.append("\nAll in your ClickUp Personal List. Reply if any shouldn't be there.")
     notify_owner("\n".join(lines)[:1400])
 
 

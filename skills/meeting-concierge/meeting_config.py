@@ -51,6 +51,14 @@ CLICKUP_LIST_KEYWORDS: list[tuple[str, str]] = [
 ]
 CLICKUP_DEFAULT_LIST_NAME = "Inbox"
 
+# Jason's own action items never go to the meeting's project list. They land
+# in his ClickUp Personal List (rule from 2026-07; ID confirmed 2026-09-13 from
+# https://app.clickup.com/9017919387/v/li/901711070226). The Personal List lives
+# in "Jason Jackson's Space" under a hidden folder, so name-walking the
+# workspace can't find it; main.py maps this name straight to the ID.
+CLICKUP_PERSONAL_LIST_NAME = "Personal List"
+CLICKUP_PERSONAL_LIST_ID = "901711070226"
+
 # ── iMessage brief ──────────────────────────────────────────────────────
 
 # Jason's iMessage handle for outbound briefs — same allowlist as the chat

@@ -21,15 +21,38 @@ from __future__ import annotations
 
 import asyncio
 import json
+import mimetypes
 import re
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 import aiohttp
 
-from models import Channel, IncomingMessage, OutgoingMessage, Platform, Thread, User
+from models import (
+    Attachment,
+    Channel,
+    IncomingMessage,
+    OutgoingMessage,
+    Platform,
+    Thread,
+    User,
+)
+
+# Where downloaded media lands, mirroring the Slack adapter's layout so both
+# surfaces drop files in the same dated inbox.
+INBOX_DIR = Path(__file__).resolve().parent.parent.parent.parent / "inbox"
+
+# iPhone photos arrive as HEIC and videos as QuickTime. Claude's Read tool can
+# view neither, so both get transcoded to something it can actually open —
+# otherwise Ricky "receives" the file and still can't see it, which is the whole
+# problem we're fixing. Both tools ship with macOS / Homebrew and are checked
+# for at call time.
+_HEIC_UTIS = {"public.heic", "public.heif"}
+_VIEWABLE_IMAGE_MIMES = {
+    "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/tiff",
+}
 
 
 def _normalize_address(addr: str) -> str:
@@ -263,7 +286,10 @@ class IMessageAdapter:
                 "offset": 0,
                 "sort": "ASC",
                 "after": after_ms,
-                "with": ["handle", "chats", "chat.participants"],
+                # "attachment" (singular) is the spelling BlueBubbles wants;
+                # without it the attachments array comes back empty and photos
+                # look like blank messages.
+                "with": ["handle", "chats", "chat.participants", "attachment"],
             },
             timeout=aiohttp.ClientTimeout(total=15),
         ) as resp:
@@ -291,7 +317,10 @@ class IMessageAdapter:
                 continue
 
             text = msg.get("text") or ""
-            if not text.strip():
+            # A photo sent with no caption has empty text. Bailing here is what
+            # made Ricky ignore pictures entirely, so only skip when there's
+            # genuinely nothing attached either.
+            if not text.strip() and not self._media_attachments(msg):
                 continue
 
             sender_handle = (msg.get("handle") or {}).get("address") or ""
@@ -313,8 +342,16 @@ class IMessageAdapter:
             participants = chat.get("participants") or [{"address": sender_handle}]
             is_dm = len([p for p in participants if p.get("address")]) <= 1
 
+            attachments = await self._download_attachments(msg)
+            if attachments and not text.strip():
+                # The agent needs something to act on. Name what arrived rather
+                # than sending an empty prompt it has to guess at.
+                kinds = ", ".join(a.filename for a in attachments)
+                text = f"(sent {len(attachments)} attachment(s) with no caption: {kinds})"
+
             incoming = IncomingMessage(
                 text=text,
+                attachments=attachments,
                 user=User(Platform.IMESSAGE, normalized_sender, display_name=sender_handle),
                 channel=Channel(
                     Platform.IMESSAGE,
@@ -333,6 +370,151 @@ class IMessageAdapter:
         if newest_ts > self._last_seen_ts:
             self._last_seen_ts = newest_ts
             self._save_last_seen(newest_ts)
+
+    # ── Attachments ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _guess_mime(att: dict[str, Any]) -> str:
+        """BlueBubbles often reports mimeType as null. Fall back to the
+        filename, then to the Apple UTI."""
+        mime = att.get("mimeType")
+        if mime:
+            return mime
+        name = att.get("transferName") or ""
+        guessed, _ = mimetypes.guess_type(name)
+        if guessed:
+            return guessed
+        uti = (att.get("uti") or "").lower()
+        if uti in _HEIC_UTIS:
+            return "image/heic"
+        if "movie" in uti or "mpeg-4" in uti:
+            return "video/quicktime"
+        return "application/octet-stream"
+
+    @classmethod
+    def _media_attachments(cls, msg: dict[str, Any]) -> list[dict[str, Any]]:
+        """Real photos/videos on a message, excluding the decorative noise.
+
+        Link previews arrive as `pluginPayloadAttachment` with
+        hideAttachment=true, and tapback stickers as isSticker=true. Neither is
+        something Jason "sent" in any meaningful sense, and downloading them
+        would spam the inbox on every URL he pastes.
+        """
+        out: list[dict[str, Any]] = []
+        for att in msg.get("attachments") or []:
+            if att.get("hideAttachment") or att.get("isSticker"):
+                continue
+            name = att.get("transferName") or ""
+            if name.endswith("pluginPayloadAttachment"):
+                continue
+            mime = cls._guess_mime(att)
+            if not (mime.startswith("image/") or mime.startswith("video/")):
+                continue
+            out.append(att)
+        return out
+
+    async def _download_attachments(self, msg: dict[str, Any]) -> list[Attachment]:
+        """Pull each photo/video down from BlueBubbles into the dated inbox.
+
+        Returns Attachments whose `url` field holds a LOCAL PATH — that's the
+        contract the engine's _build_attachment_context expects, and what lets
+        the agent open the file with the Read tool.
+        """
+        atts = self._media_attachments(msg)
+        if not atts or self._session is None:
+            return []
+
+        inbox = INBOX_DIR / date.today().isoformat()
+        inbox.mkdir(parents=True, exist_ok=True)
+
+        results: list[Attachment] = []
+        for att in atts:
+            guid = att.get("guid")
+            if not guid:
+                continue
+            mime = self._guess_mime(att)
+            raw_name = att.get("transferName") or f"{guid}.bin"
+            safe_name = re.sub(r"[^\w.\-]", "_", raw_name)
+            local = inbox / f"{datetime.now().strftime('%H%M%S')}_{safe_name}"
+
+            try:
+                async with self._session.get(
+                    f"{self.base_url}/api/v1/attachment/{guid}/download",
+                    params={"password": self.password},
+                    timeout=aiohttp.ClientTimeout(total=120),
+                ) as resp:
+                    if resp.status != 200:
+                        print(f"[{datetime.now()}] attachment {safe_name} HTTP {resp.status}")
+                        continue
+                    data = await resp.read()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[{datetime.now()}] attachment {safe_name} download failed: {exc}")
+                continue
+
+            local.write_bytes(data)
+            print(f"[{datetime.now()}] Downloaded {safe_name} ({len(data)}B) -> {local}")
+
+            viewable, view_mime = await self._make_viewable(local, mime)
+            results.append(
+                Attachment(
+                    filename=viewable.name,
+                    mimetype=view_mime,
+                    url=str(viewable),
+                    size_bytes=len(data),
+                )
+            )
+        return results
+
+    async def _make_viewable(self, path: Path, mime: str) -> tuple[Path, str]:
+        """Convert media Claude can't open into media it can.
+
+        HEIC -> JPEG via sips. Video -> a single JPEG frame via ffmpeg, since
+        the model can't watch video but can read a still from it. On any
+        failure we return the original: a file the agent can at least name and
+        hand to another tool beats dropping the message.
+        """
+        try:
+            if mime == "image/heic" or path.suffix.lower() in {".heic", ".heif"}:
+                out = path.with_suffix(".jpg")
+                if await self._run("/usr/bin/sips", "-s", "format", "jpeg",
+                                   str(path), "--out", str(out)):
+                    print(f"[{datetime.now()}] HEIC -> JPEG: {out.name}")
+                    return out, "image/jpeg"
+
+            elif mime.startswith("video/"):
+                out = path.with_suffix(".frame.jpg")
+                # -ss before -i seeks fast; 1s in avoids an opening black frame.
+                if await self._run("ffmpeg", "-nostdin", "-y", "-ss", "1",
+                                   "-i", str(path), "-frames:v", "1",
+                                   "-q:v", "3", str(out)) and out.exists():
+                    print(f"[{datetime.now()}] video frame extracted: {out.name}")
+                    return out, "image/jpeg"
+
+            elif mime not in _VIEWABLE_IMAGE_MIMES and mime.startswith("image/"):
+                out = path.with_suffix(".jpg")
+                if await self._run("/usr/bin/sips", "-s", "format", "jpeg",
+                                   str(path), "--out", str(out)):
+                    return out, "image/jpeg"
+        except Exception as exc:  # noqa: BLE001
+            print(f"[{datetime.now()}] transcode failed for {path.name}: {exc}")
+        return path, mime
+
+    @staticmethod
+    async def _run(*cmd: str) -> bool:
+        """Run a converter, swallowing its chatter. True on exit 0."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(proc.wait(), timeout=120)
+            return proc.returncode == 0
+        except FileNotFoundError:
+            print(f"[{datetime.now()}] converter not installed: {cmd[0]}")
+            return False
+        except Exception:  # noqa: BLE001
+            return False
 
     # ── Helpers ─────────────────────────────────────────────────────────
 

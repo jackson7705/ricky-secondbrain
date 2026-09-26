@@ -26,6 +26,30 @@ It searches ALL inboxes (growthpro/locafy/wonderly), finds the vendor's most rec
 - If `[not-found]`, the receipt may be older than 120 days or under a different vendor spelling — try `--account locafy` or a different `--vendor` token.
 - `[already-filed]` means it's done — just report that.
 
+### `file-now --drive` — receipt is already in Drive, not Gmail
+
+When Jason says **"these are in the folder for you"**, **"I dropped the PDFs in September"**, or sends a Drive link to a receipt, the PDF is already in Drive and there's no email to search. Use the same command with `--drive`:
+
+```bash
+# Sweep the month folder for unfiled PDFs that mention the vendor (filename or PDF text)
+cd .claude/skills/invoice-router && uv run --project ../../scripts python main.py file-now --vendor ahrefs --business locafy --month 2026-09 --drive folder
+
+# Specific file(s) — Drive URL or ID, from any folder (gets moved into the month folder)
+cd .claude/skills/invoice-router && uv run --project ../../scripts python main.py file-now --vendor ahrefs --business locafy --month 2026-09 --drive https://drive.google.com/file/d/<id>/view
+
+# Preview first
+... --drive folder --dry-run
+```
+
+It downloads the PDF, reads the **amount and date out of the PDF text** (labelled totals like "Amount paid" win over the largest-dollar heuristic), renames the file in place to `YYYY-MM-DD — vendor — $X.XX.pdf`, moves it into the month folder if it isn't there, logs the sheet row, and records it under `processed_drive_ids` in `state.json`. Then reply with the Drive link and the amount.
+
+- `--amount 163.00` overrides the extracted amount (e.g. a Southwest receipt where part of the fare was flight credit).
+- `--no-sheet` when the sheet row already exists and you only want the rename/move (backfilling PDFs Jason uploaded by hand).
+- `--force` re-processes a file already in `processed_drive_ids` (e.g. to finish a rename that was refused).
+- "Unfiled" in sweep mode = filename doesn't already match the `YYYY-MM-DD — ` convention and the ID isn't in `processed_drive_ids`. Normalized files are never touched.
+- If it prints `[warn] Drive refused rename/move`, the growthpro token predates the full `drive` scope. Re-auth via `.claude/scripts/reconnect_google.py begin/finish --account growthpro` (two-step, chat-friendly), then re-run.
+- Sweep mode only files PDFs matching the requested vendor — one vendor per command, same as the Gmail path.
+
 The SCAN/APPROVE/APPLY flow below is for the **bulk backlog** (many receipts at once), not same-day one-offs.
 
 ## Two-Step Flow (bulk backlog)

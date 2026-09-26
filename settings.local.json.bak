@@ -10,7 +10,6 @@
       "Read(//private/tmp/jasonsecondbrain/**)",
       "Read(//Users/magicman/SecondBrain/.claude/**)",
       "Read(//Users/magicman/SecondBrain/Dynamous/**)",
-      "Read(//Users/magicman/SecondBrain/inbox/**)",
       "Write(//Users/magicman/SecondBrain/.claude/skills/invoice-router/**)",
       "Edit(//Users/magicman/SecondBrain/.claude/skills/invoice-router/**)",
       "Bash(cd /Users/magicman/SecondBrain/.claude/skills/invoice-router && uv run *)",

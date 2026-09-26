@@ -66,11 +66,13 @@ GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/documents.readonly",
-    "https://www.googleapis.com/auth/drive.readonly",
-    # drive.file — per-file access for files the app creates/opens.
-    # Added 2026-04-19 for `invoice-router` to upload receipt PDFs into the
-    # Locafy/Wonderly expense folders without needing full drive access.
-    "https://www.googleapis.com/auth/drive.file",
+    # Full Drive scope (supersedes drive.readonly + drive.file, 2026-09-12).
+    # drive.file only let the app touch files it created itself, so receipt
+    # PDFs Jason uploaded by hand couldn't be renamed/moved by invoice-router.
+    # Tokens issued before this change still carry the old scopes (auth.py
+    # loads granted scopes from the token file) — re-auth a profile with
+    # `setup_auth.py --account <profile>` to pick this up.
+    "https://www.googleapis.com/auth/drive",
 ]
 
 # Multi-profile Google support: each profile gets its own token file
@@ -113,7 +115,12 @@ CLICKUP_LIST_IDS = [s.strip() for s in os.getenv("CLICKUP_LIST_IDS", "").split("
 # Owner's ClickUp user id (task assignee) + the "Inbox" list where autonomous
 # jobs (loose_ends, fathom_sweep) file captured to-dos. Per-owner — set in .env.
 CLICKUP_OWNER_UID = os.getenv("CLICKUP_OWNER_UID", "").strip()
-CLICKUP_INBOX_LIST_ID = os.getenv("CLICKUP_INBOX_LIST_ID", "").strip()
+# Jason's Personal List (Jason Jackson's Space, hidden folder). This is where
+# autonomous jobs file to-dos. NOT CLICKUP_INBOX_LIST_ID -- that env var pointed
+# at "Mission Inbox" (901711572708), a CLIENT list in the Locafy space, and
+# fathom_sweep/loose_ends filed ~40 personal to-dos there until 2026-09-15.
+CLICKUP_PERSONAL_LIST_ID = os.getenv("CLICKUP_PERSONAL_LIST_ID", "901711070226").strip()
+CLICKUP_INBOX_LIST_ID = CLICKUP_PERSONAL_LIST_ID  # legacy alias; do not point at a client list
 
 # LinkedIn (aeo-authority-content publish path)
 LINKEDIN_CLIENT_ID = os.getenv("LINKEDIN_CLIENT_ID", "")

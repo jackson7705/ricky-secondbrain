@@ -339,7 +339,9 @@ def run_digest(fathom_file: Path | None = None) -> int:
                 "text": item.get("text", ""),
                 "owner": item.get("owner", "jason"),
                 "due": item.get("due"),
-                "proposed_list": _pick_clickup_list(meeting_title),
+                "proposed_list": _pick_clickup_list(
+                    meeting_title, item.get("owner", "jason")
+                ),
                 "needs_followup_email": bool(item.get("needs_followup_email")),
                 "followup": {
                     "to": item.get("followup_to", ""),
@@ -361,10 +363,19 @@ def run_digest(fathom_file: Path | None = None) -> int:
     return 0
 
 
-def _pick_clickup_list(meeting_title: str) -> str:
-    """Suggest the ClickUp list name based on the meeting title."""
-    from meeting_config import CLICKUP_DEFAULT_LIST_NAME, CLICKUP_LIST_KEYWORDS
+def _pick_clickup_list(meeting_title: str, owner: str = "jason") -> str:
+    """Suggest the ClickUp list name for an action item.
 
+    Anything Jason owns goes to his Personal List regardless of the meeting.
+    Other owners fall through to the meeting-title keyword map."""
+    from meeting_config import (
+        CLICKUP_DEFAULT_LIST_NAME,
+        CLICKUP_LIST_KEYWORDS,
+        CLICKUP_PERSONAL_LIST_NAME,
+    )
+
+    if (owner or "jason").strip().lower() == "jason":
+        return CLICKUP_PERSONAL_LIST_NAME
     low = (meeting_title or "").lower()
     for keyword, list_name in CLICKUP_LIST_KEYWORDS:
         if keyword.lower() in low:
@@ -384,6 +395,7 @@ def run_apply() -> int:
 
     from integrations.clickup_api import create_task, find_list_id_by_name
     from integrations.gmail import create_gmail_draft
+    from meeting_config import CLICKUP_PERSONAL_LIST_ID, CLICKUP_PERSONAL_LIST_NAME
 
     pending = _load_json(PENDING_DIGEST_FILE, [])
     approved = [p for p in pending if p.get("status") == "approved"]
@@ -399,7 +411,10 @@ def run_apply() -> int:
             # Resolve the ClickUp list (cache across entries to save API calls)
             list_name = entry.get("clickup_list") or entry.get("proposed_list")
             if list_name and list_name not in list_id_cache:
-                list_id_cache[list_name] = find_list_id_by_name(list_name)
+                if list_name == CLICKUP_PERSONAL_LIST_NAME:
+                    list_id_cache[list_name] = CLICKUP_PERSONAL_LIST_ID
+                else:
+                    list_id_cache[list_name] = find_list_id_by_name(list_name)
             list_id = list_id_cache.get(list_name) if list_name else None
 
             # Due date

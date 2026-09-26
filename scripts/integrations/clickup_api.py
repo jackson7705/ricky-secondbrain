@@ -1,16 +1,20 @@
 """
 ClickUp Direct Integration for Second Brain.
 
-Queries the ClickUp REST API with a Personal API Token. Used by the heartbeat
-to surface overdue / due-soon tasks for the authenticated user (Jason) within
-the Locafy workspace.
+Queries the ClickUp REST API. Used by the heartbeat to surface overdue /
+due-soon tasks for the authenticated user (Jason) within the Locafy workspace.
+
+Transport (2026-09-13): calls go through `composio proxy --toolkit clickup`,
+which injects Jason's managed OAuth credential. The Personal API Token path is
+kept as a fallback for machines without the Composio CLI; the PAT in the env
+file went 401 on 2026-05-16 and was never replaced, which is why this moved.
 
 Setup:
-    1. Get a Personal API Token from https://app.clickup.com/settings/apps
-       (look for "API Token" → "Generate"). Token starts with `pk_`.
+    1. `composio login` once on the machine (installs to ~/.local/bin).
+       Fallback only: a Personal API Token from https://app.clickup.com/settings/apps
     2. Add to .claude/scripts/.env:
-           CLICKUP_API_TOKEN=pk_...
            CLICKUP_WORKSPACE_ID=<workspace-id>
+           # Optional fallback: CLICKUP_API_TOKEN=pk_...
            # Optional: CLICKUP_LIST_IDS=123,456   (scope queries to these lists)
 
 Usage:
@@ -39,6 +43,75 @@ from sanitize import sanitize_external_text  # noqa: E402
 from shared import with_retry  # noqa: E402
 
 CLICKUP_API_BASE = "https://api.clickup.com/api/v2"
+COMPOSIO_TOOLKIT = "clickup"
+
+
+class ClickUpAPIError(RuntimeError):
+    """ClickUp returned an error body ({"err": ..., "ECODE": ...})."""
+
+
+def _composio_bin() -> str | None:
+    import shutil
+
+    found = shutil.which("composio")
+    if found:
+        return found
+    for candidate in (Path.home() / ".local/bin/composio", Path("/opt/homebrew/bin/composio")):
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def _request(
+    method: str,
+    path: str,
+    params: dict[str, Any] | None = None,
+    json_body: dict[str, Any] | None = None,
+    timeout: int = 20,
+) -> dict[str, Any]:
+    """Single transport for every ClickUp call. Composio proxy first, PAT second.
+
+    Returns the parsed JSON body. Raises ClickUpAPIError on a ClickUp error
+    body (the proxy exits 0 even for API errors, so status codes can't be
+    trusted; the body's `err` key is the signal).
+    """
+    import json
+    import subprocess
+    from urllib.parse import urlencode
+
+    url = f"{CLICKUP_API_BASE}{path}"
+    if params:
+        url += "?" + urlencode(params, doseq=True)
+
+    composio = _composio_bin()
+    if composio:
+        cmd = [composio, "proxy", url, "--toolkit", COMPOSIO_TOOLKIT, "-X", method]
+        if json_body is not None:
+            cmd += ["-H", "content-type: application/json", "-d", json.dumps(json_body)]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 30)
+        raw = proc.stdout.strip()
+        try:
+            data = json.loads(raw) if raw else {}
+        except json.JSONDecodeError as exc:
+            raise ClickUpAPIError(
+                f"composio proxy returned non-JSON for {method} {path}: "
+                f"{(raw or proc.stderr)[:300]}"
+            ) from exc
+        if proc.returncode != 0 and not data:
+            raise ClickUpAPIError(f"composio proxy failed: {proc.stderr.strip()[:300]}")
+    else:
+        import httpx
+
+        if json_body is not None:
+            resp = httpx.request(method, url, headers=_headers(), json=json_body, timeout=timeout)
+        else:
+            resp = httpx.request(method, url, headers=_headers(), timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json()
+
+    if isinstance(data, dict) and "err" in data:
+        raise ClickUpAPIError(f"{data.get('ECODE', 'ERR')}: {data['err']} ({method} {path})")
+    return data
 
 
 @dataclass
@@ -87,17 +160,8 @@ def _current_user_id() -> int:
     if _CACHED_USER_ID is not None:
         return _CACHED_USER_ID
 
-    import httpx
-
-    resp = with_retry(
-        lambda: httpx.get(
-            f"{CLICKUP_API_BASE}/user",
-            headers=_headers(),
-            timeout=10,
-        )
-    )
-    resp.raise_for_status()
-    _CACHED_USER_ID = int(resp.json()["user"]["id"])
+    data = with_retry(lambda: _request("GET", "/user", timeout=10))
+    _CACHED_USER_ID = int(data["user"]["id"])
     return _CACHED_USER_ID
 
 
@@ -150,8 +214,6 @@ def get_my_tasks(
         list_ids:       Optional explicit list scoping. Falls back to
                         `CLICKUP_LIST_IDS` env, or workspace-wide if neither set.
     """
-    import httpx
-
     workspace = _require_workspace()
     user_id = _current_user_id()
 
@@ -165,17 +227,10 @@ def get_my_tasks(
     if target_lists:
         params["list_ids[]"] = target_lists
 
-    resp = with_retry(
-        lambda: httpx.get(
-            f"{CLICKUP_API_BASE}/team/{workspace}/task",
-            headers=_headers(),
-            params=params,
-            timeout=15,
-        )
+    data = with_retry(
+        lambda: _request("GET", f"/team/{workspace}/task", params=params, timeout=15)
     )
-    resp.raise_for_status()
-
-    return [_parse_task(t) for t in resp.json().get("tasks", [])]
+    return [_parse_task(t) for t in data.get("tasks", [])]
 
 
 def get_overdue_tasks() -> list[ClickUpTask]:
@@ -204,54 +259,65 @@ def find_list_id_by_name(name_substring: str) -> str | None:
     case-insensitive substring on the list name. Used by meeting-concierge
     to route action items to a list without Jason hand-typing GIDs.
     """
-    import httpx
-
     workspace = _require_workspace()
     target = name_substring.strip().lower()
     if not target:
         return None
 
-    # Spaces in workspace
+    not_archived = {"archived": "false"}
     spaces = with_retry(
-        lambda: httpx.get(
-            f"{CLICKUP_API_BASE}/team/{workspace}/space",
-            headers=_headers(),
-            params={"archived": "false"},
-            timeout=15,
-        )
+        lambda: _request("GET", f"/team/{workspace}/space", params=not_archived, timeout=15)
     )
-    spaces.raise_for_status()
-    for space in spaces.json().get("spaces", []):
+    for space in spaces.get("spaces", []):
         space_id = space["id"]
-        # Folderless lists
-        folderless = with_retry(
-            lambda sid=space_id: httpx.get(
-                f"{CLICKUP_API_BASE}/space/{sid}/list",
-                headers=_headers(),
-                params={"archived": "false"},
-                timeout=15,
+        # Folderless lists. A space Jason can't read raises; skip it, don't abort.
+        try:
+            folderless = with_retry(
+                lambda sid=space_id: _request(
+                    "GET", f"/space/{sid}/list", params=not_archived, timeout=15
+                )
             )
-        )
-        if folderless.status_code == 200:
-            for lst in folderless.json().get("lists", []):
-                if target in (lst.get("name") or "").lower():
-                    return lst["id"]
+        except ClickUpAPIError:
+            folderless = {}
+        for lst in folderless.get("lists", []):
+            if target in (lst.get("name") or "").lower():
+                return lst["id"]
         # Folders → lists
-        folders = with_retry(
-            lambda sid=space_id: httpx.get(
-                f"{CLICKUP_API_BASE}/space/{sid}/folder",
-                headers=_headers(),
-                params={"archived": "false"},
-                timeout=15,
+        try:
+            folders = with_retry(
+                lambda sid=space_id: _request(
+                    "GET", f"/space/{sid}/folder", params=not_archived, timeout=15
+                )
             )
-        )
-        if folders.status_code != 200:
+        except ClickUpAPIError:
             continue
-        for folder in folders.json().get("folders", []):
+        for folder in folders.get("folders", []):
             for lst in folder.get("lists", []):
                 if target in (lst.get("name") or "").lower():
                     return lst["id"]
     return None
+
+
+def list_task_names(list_id: str, include_closed: bool = True) -> list[str]:
+    """Lower-cased names of every task in a list (closed included by default).
+
+    Used by the autonomous jobs (loose_ends, fathom_sweep) for live dedup. The
+    Redis mirror lags by hours, so a morning run's task is invisible to the
+    evening run unless we ask ClickUp directly. Paginates until last_page.
+    """
+    names: list[str] = []
+    page = 0
+    while True:
+        params: dict[str, Any] = {"page": page, "subtasks": "true"}
+        if include_closed:
+            params["include_closed"] = "true"
+        data = _request("GET", f"/list/{list_id}/task", params=params)
+        tasks = data.get("tasks", []) or []
+        names.extend((t.get("name") or "").lower() for t in tasks)
+        if data.get("last_page", True) or not tasks:
+            break
+        page += 1
+    return names
 
 
 def create_task(
@@ -267,8 +333,6 @@ def create_task(
     Priority: 1=urgent, 2=high, 3=normal, 4=low.
     Due is a date (not datetime) — converted to end-of-day UTC ms internally.
     """
-    import httpx
-
     body: dict[str, Any] = {"name": name}
     if description:
         body["description"] = description
@@ -283,16 +347,10 @@ def create_task(
         body["due_date"] = int(dt.timestamp() * 1000)
         body["due_date_time"] = True
 
-    resp = with_retry(
-        lambda: httpx.post(
-            f"{CLICKUP_API_BASE}/list/{list_id}/task",
-            headers=_headers(),
-            json=body,
-            timeout=20,
-        )
+    data = with_retry(
+        lambda: _request("POST", f"/list/{list_id}/task", json_body=body, timeout=20)
     )
-    resp.raise_for_status()
-    return _parse_task(resp.json())
+    return _parse_task(data)
 
 
 def format_tasks_for_context(tasks: list[ClickUpTask], max_chars: int = 2000) -> str:
