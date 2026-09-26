@@ -28,6 +28,17 @@ from session import Session, SQLiteSessionStore  # noqa: E402
 import pending_tasks  # noqa: E402
 
 
+async def _prompt_text(prompt: Any) -> str:
+    """The engine sends the prompt as a one-item async stream (streaming mode is
+    required by can_use_tool); flatten it back to text for assertions."""
+    if isinstance(prompt, str):
+        return prompt
+    parts = []
+    async for item in prompt:
+        parts.append(item["message"]["content"])
+    return "".join(parts)
+
+
 def _incoming(text: str, channel: str = "C1", thread: str | None = None) -> IncomingMessage:
     return IncomingMessage(
         text=text,
@@ -286,8 +297,8 @@ def test_rotated_session_gets_recent_conversation_recap(monkeypatch: pytest.Monk
     ])
     prompts: list[str] = []
 
-    async def fake_query(*, prompt: str, options: Any) -> Any:
-        prompts.append(prompt)
+    async def fake_query(*, prompt: Any, options: Any) -> Any:
+        prompts.append(await _prompt_text(prompt))
         assert options.resume is None, "rotated session must start fresh"
         yield AssistantMessage(content=[TextBlock(text="ok")], model="m")
         yield ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
@@ -342,3 +353,21 @@ def test_repo_fix_requests_get_large_runtime_policy() -> None:
         "Fix these on airsenseenvironmental.com you should have access to the repo", normal, large
     ) is large
     assert _runtime_policy_for("Verbal is locafy sept", normal, large) is normal
+
+
+# ── 6. HEIC photos become JPEGs the agent can open ────────────────────────
+
+
+def test_transcode_passes_non_heic_through(tmp_path: Path) -> None:
+    from adapters.imessage import _transcode_if_needed
+    f = tmp_path / "receipt.pdf"
+    f.write_bytes(b"%PDF-1.4")
+    assert asyncio.run(_transcode_if_needed(f, "application/pdf")) == (f, "application/pdf")
+
+
+def test_transcode_keeps_original_when_conversion_fails(tmp_path: Path) -> None:
+    from adapters.imessage import _transcode_if_needed
+    f = tmp_path / "IMG_0001.HEIC"
+    f.write_bytes(b"not really an image")  # sips rejects it → fallback path
+    path, mime = asyncio.run(_transcode_if_needed(f, "image/heic"))
+    assert path == f and path.exists() and mime == "image/heic"

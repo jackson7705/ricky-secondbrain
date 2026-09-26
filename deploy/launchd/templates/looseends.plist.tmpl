@@ -6,7 +6,7 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string><string>-c</string>
-    <string>PROJECT_DIR="__PROJECT_DIR__"; SCRIPTS_DIR="$PROJECT_DIR/.claude/scripts"; LOG_DIR="__LOG_DIR__"; mkdir -p "$LOG_DIR"; cd "$SCRIPTS_DIR"; export CLAUDE_PROJECT_DIR="$PROJECT_DIR" PATH="$PATH:/opt/homebrew/bin:__HOME__/.local/bin"; exec uv run python loose_ends.py --apply &gt;&gt; "$LOG_DIR/looseends.log" 2&gt;&amp;1</string>
+    <string>PROJECT_DIR="__PROJECT_DIR__"; SCRIPTS_DIR="$PROJECT_DIR/.claude/scripts"; LOG_DIR="__LOG_DIR__"; mkdir -p "$LOG_DIR"; cd "$SCRIPTS_DIR"; export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; export CLAUDE_PROJECT_DIR="$PROJECT_DIR" PATH="$PATH:/opt/homebrew/bin:__HOME__/.local/bin"; exec uv run python loose_ends.py --apply &gt;&gt; "$LOG_DIR/looseends.log" 2&gt;&amp;1</string>
   </array>
   <key>StartCalendarInterval</key>
   <array>

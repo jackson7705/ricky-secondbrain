@@ -8,7 +8,7 @@
 	<array>
 		<string>/bin/bash</string>
 		<string>-c</string>
-		<string>PROJECT_DIR="__PROJECT_DIR__"; SCRIPTS_DIR="$PROJECT_DIR/.claude/scripts"; LOG_DIR="__LOG_DIR__"; mkdir -p "$LOG_DIR"; cd "$SCRIPTS_DIR"; export CLAUDE_PROJECT_DIR="$PROJECT_DIR" PATH="$PATH:/opt/homebrew/bin:__HOME__/.local/bin"; uv run python memory_lint.py --apply &gt;&gt; "$LOG_DIR/memorylint.log" 2&gt;&amp;1; uv run python memory_lint.py --semantic &gt;&gt; "$LOG_DIR/memorylint.log" 2&gt;&amp;1; echo "[redis-iris refresh]" &gt;&gt; "$LOG_DIR/memorylint.log"; uv run python redis_iris/load_data.py &gt;&gt; "$LOG_DIR/memorylint.log" 2&gt;&amp;1</string>
+		<string>PROJECT_DIR="__PROJECT_DIR__"; SCRIPTS_DIR="$PROJECT_DIR/.claude/scripts"; LOG_DIR="__LOG_DIR__"; mkdir -p "$LOG_DIR"; cd "$SCRIPTS_DIR"; export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; export CLAUDE_PROJECT_DIR="$PROJECT_DIR" PATH="$PATH:/opt/homebrew/bin:__HOME__/.local/bin"; uv run python memory_lint.py --apply &gt;&gt; "$LOG_DIR/memorylint.log" 2&gt;&amp;1; uv run python memory_lint.py --semantic &gt;&gt; "$LOG_DIR/memorylint.log" 2&gt;&amp;1; echo "[redis-iris refresh]" &gt;&gt; "$LOG_DIR/memorylint.log"; uv run python redis_iris/load_data.py &gt;&gt; "$LOG_DIR/memorylint.log" 2&gt;&amp;1</string>
 	</array>
 	<key>StandardErrorPath</key>
 	<string>__LOG_DIR__/memorylint-stderr.log</string>

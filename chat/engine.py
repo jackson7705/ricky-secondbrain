@@ -90,6 +90,23 @@ _LARGE_TASK_INTENT_RE = re.compile(
 )
 
 
+# Work that earns the expensive model. Deliberately narrower than the runtime
+# policy above: model choice and watchdog timeouts are separate concerns — a
+# slide deck needs a long silence window but not Fable's reasoning, while a
+# one-line bug fix needs the reasoning and finishes in a minute.
+_HEAVY_MODEL_INTENT_RE = re.compile(
+    r"\b(?:"
+    r"debug|refactor|implement|"
+    r"pull\s+request|"
+    r"(?:fix|trace|diagnose|root[- ]cause)\s+(?:the\s+|this\s+|a\s+)?"
+    r"(?:bug|crash|error|failure|regression|test)|"
+    r"(?:write|build|ship|patch)\s+(?:the\s+|a\s+|some\s+)?"
+    r"(?:code|script|feature|function|module|fix|test|tests)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
 def _runtime_policy_for(
     text: str,
     normal_policy: TaskRuntimePolicy,
@@ -99,6 +116,92 @@ def _runtime_policy_for(
     if _SLIDE_DECK_INTENT_RE.search(text) or _LARGE_TASK_INTENT_RE.search(text):
         return large_policy
     return normal_policy
+
+
+def _model_for(text: str, default_model: str, heavy_model: str) -> str:
+    """Pick the model for this turn — heavy only for code-shaped asks."""
+    if heavy_model and _HEAVY_MODEL_INTENT_RE.search(text):
+        return heavy_model
+    return default_model
+
+
+_FILE_WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+
+# Secrets that live under scripts/ and must stay unwritable even though the
+# directory as a whole is now self-editable. Belt to the block-secrets hook's
+# braces — that hook is the real enforcement, this is the second line.
+_NEVER_WRITABLE_RE = re.compile(r"(\.env($|\.)|credentials\.json|_token\.json|\.pem$|\.key$)", re.IGNORECASE)
+
+
+def _make_permission_callback(scripts_dir: Path):
+    """Allow Ricky to edit its own scripts/ — nothing else.
+
+    Claude Code hard-codes `.claude/**` as sensitive, exempting only skills,
+    agents, commands, worktrees, and scheduled_tasks.json (verified against CLI
+    2.1.269). `.claude/scripts/` isn't on that list, and no settings rule
+    overrides it — which is why work built in chat kept getting stranded in
+    /tmp/ricky-build waiting for a desktop terminal to apply it.
+
+    This callback only ever runs for calls the CLI would otherwise prompt on,
+    so denying everything else preserves today's behavior exactly rather than
+    widening it. Deliberately NOT permission_mode="bypassPermissions", which
+    would also unlock ~/.claude, .git, and the hook that enforces the rest.
+    """
+
+    # Imported lazily, matching how the rest of this module defers the SDK.
+    from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
+
+    async def can_use_tool(tool_name: str, tool_input: dict[str, Any], context: Any) -> Any:
+        raw = tool_input.get("file_path") or tool_input.get("path") or ""
+        if tool_name in _FILE_WRITE_TOOLS and raw:
+            target = Path(str(raw)).expanduser()
+            try:
+                resolved = target.resolve()
+                inside = resolved.is_relative_to(scripts_dir.resolve())
+            except (OSError, ValueError):
+                inside = False
+            if inside and not _NEVER_WRITABLE_RE.search(resolved.name):
+                print(f"[{datetime.now()}] Self-edit allowed: {resolved}")
+                return PermissionResultAllow()
+        return PermissionResultDeny(
+            message=(
+                f"{tool_name} on {raw or 'this target'} is outside Ricky's "
+                "self-edit scope (.claude/scripts/, excluding credentials)."
+            )
+        )
+
+    return can_use_tool
+
+
+def _repo_dirs_for(
+    text: str,
+    workspace_root: Path,
+    allowlist: list[str],
+) -> list[str]:
+    """Allowlisted repos this turn may write to, as absolute paths.
+
+    Granted when the turn looks like code work, or when the message names a
+    repo outright ("check locafy-website"). Ordinary turns get nothing — a
+    calendar question has no business holding write access to the Locafy repos.
+    Repos that aren't cloned locally are skipped rather than passed through;
+    the SDK rejects directories that don't exist.
+    """
+    if not allowlist:
+        return []
+    named = [r for r in allowlist if re.search(rf"\b{re.escape(r)}\b", text, re.IGNORECASE)]
+    if not named and not _HEAVY_MODEL_INTENT_RE.search(text):
+        return []
+    dirs = []
+    for repo in named or allowlist:
+        path = workspace_root / repo
+        if path.is_dir():
+            dirs.append(str(path))
+        elif repo in named:
+            # Named outright but not on disk. Say so — otherwise Ricky just
+            # silently lacks access and reports a confusing failure later.
+            print(f"[{datetime.now()}] Repo '{repo}' not cloned at {path} — "
+                  f"run: gh repo clone <owner>/{repo} {path}")
+    return dirs
 
 
 def _next_watchdog_timeout(policy: TaskRuntimePolicy, elapsed_seconds: float) -> float:
@@ -211,11 +314,27 @@ class ConversationEngine:
         hard_ceiling_seconds: float = 1800,
         large_task_inactivity_timeout_seconds: float = 3600,
         large_task_hard_ceiling_seconds: float = 14400,
+        cli_path: str = "",
+        model: str = "claude-opus-5",
+        heavy_model: str = "",
+        repo_workspace_root: Path | None = None,
+        code_repo_allowlist: list[str] | None = None,
     ) -> None:
         self.session_store = session_store
         self.project_root = project_root
         self.max_turns = max_turns
         self.max_budget_usd = max_budget_usd
+        # Which `claude` binary the SDK drives. Empty = let the SDK pick, which
+        # means its bundled 2.1.114 build and no access to the Claude 5 models.
+        # See config.CHAT_CLI_PATH.
+        self.cli_path = cli_path
+        self.model = model
+        self.heavy_model = heavy_model
+        # Repos outside the vault Ricky may write to. cwd stays ~/SecondBrain —
+        # moving it would strip skill/agent/settings discovery — so access is
+        # granted per-turn through add_dirs instead. See config.CODE_REPO_ALLOWLIST.
+        self.repo_workspace_root = repo_workspace_root or (Path.home() / "Projects")
+        self.code_repo_allowlist = code_repo_allowlist or []
         # Rotate the underlying Agent SDK session when it gets stale. Keeps
         # cumulative cost bounded (so we don't drift back into the $100 budget
         # cap) and keeps the in-context history short (faster + cheaper turns).
@@ -385,10 +504,18 @@ class ConversationEngine:
             self.normal_runtime_policy,
             self.large_runtime_policy,
         )
+        turn_model = _model_for(message.text, self.model, self.heavy_model)
+        repo_dirs = _repo_dirs_for(
+            message.text,
+            self.repo_workspace_root,
+            self.code_repo_allowlist,
+        )
         print(
             f"[{datetime.now()}] Runtime profile={runtime_policy.name} "
             f"(silence={runtime_policy.inactivity_timeout_seconds:.0f}s, "
-            f"ceiling={runtime_policy.hard_ceiling_seconds:.0f}s)"
+            f"ceiling={runtime_policy.hard_ceiling_seconds:.0f}s) "
+            f"model={turn_model} "
+            f"repos={[Path(d).name for d in repo_dirs] or 'vault only'}"
         )
 
         # Hard-inject the deliverable rule when the user's message looks like
@@ -422,6 +549,7 @@ class ConversationEngine:
         # Build Agent SDK options
         options_kwargs: dict[str, Any] = {
             "cwd": str(self.project_root),
+            "model": turn_model,
             "setting_sources": ["user", "project"],
             "system_prompt": {
                 "type": "preset",
@@ -500,6 +628,12 @@ class ConversationEngine:
                 "WebSearch",
                 "WebFetch",
                 "NotebookEdit",
+                # Subagent dispatch. Without this, the 78 specialists in
+                # .claude/agents/ are only reachable from a Claude Code session
+                # — over Slack/iMessage they were unreachable dead weight.
+                # Tool name verified against the bundled CLI (2.1.114): the tool
+                # registers as "Agent" with "Task" as a legacy alias.
+                "Agent",
                 # Apify MCP — lets content-research score real engagement
                 # (view counts) on short-form refs instead of best-effort
                 # site:-restricted guessing. No-op if apify isn't configured.
@@ -542,6 +676,14 @@ class ConversationEngine:
                 ]
             },
         }
+
+        if self.cli_path:
+            options_kwargs["cli_path"] = self.cli_path
+        options_kwargs["can_use_tool"] = _make_permission_callback(
+            self.project_root / ".claude" / "scripts"
+        )
+        if repo_dirs:
+            options_kwargs["add_dirs"] = repo_dirs
 
         # Resume existing conversation if we have a session AND it has an
         # agent SDK id (rotation clears it to force a fresh underlying session).
@@ -614,7 +756,21 @@ class ConversationEngine:
 
         while True:
             try:
-                _agen = query(prompt=message.text, options=options).__aiter__()
+                # Streaming-mode prompt (an AsyncIterable, not a str) — required
+                # whenever can_use_tool is set, which is how Ricky gets write
+                # access to its own scripts/. A plain string raises
+                # "can_use_tool callback requires streaming mode" and every turn
+                # fails, so these two must change together. Built inside the
+                # retry loop because an async generator can only be consumed once.
+                async def _prompt_stream(text: str = message.text):
+                    yield {
+                        "type": "user",
+                        "message": {"role": "user", "content": text},
+                        "parent_tool_use_id": None,
+                        "session_id": "default",
+                    }
+
+                _agen = query(prompt=_prompt_stream(), options=options).__aiter__()
                 while True:
                     elapsed_total = monotonic() - agent_started
                     hard_ceiling_is_next = (

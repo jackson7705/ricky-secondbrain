@@ -31,6 +31,20 @@ TEMPLATES = HERE / "launchd" / "templates"
 # repo root = .../SecondBrain ; this file is .../SecondBrain/.claude/deploy/
 PROJECT_DIR = HERE.parent.parent
 
+# OWNER_LAUNCHD_SLUG lives in scripts/.env, which nothing here loaded before —
+# so a run from a shell that hadn't exported it silently fell back to
+# "<unix-user>secondbrain" and generated a SECOND, differently-labelled copy of
+# every job. That is not a cosmetic naming slip: both copies load and run, so
+# two chat processes poll BlueBubbles and the owner gets doubled replies.
+# Observed 2026-09-13. Load the .env first so the slug is the same value the
+# rest of the system uses.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(PROJECT_DIR / ".claude" / "scripts" / ".env", override=False)
+except ImportError:  # dotenv is a scripts/ dependency; tolerate running without it
+    pass
+
 
 def _config() -> dict[str, str]:
     home = str(Path.home())

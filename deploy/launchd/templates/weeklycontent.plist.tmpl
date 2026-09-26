@@ -8,7 +8,7 @@
     <array>
         <string>/bin/bash</string>
         <string>-c</string>
-        <string>PROJECT_DIR="__PROJECT_DIR__"; SCRIPTS_DIR="$PROJECT_DIR/.claude/scripts"; LOG_DIR="__LOG_DIR__"; mkdir -p "$LOG_DIR"; cd "$SCRIPTS_DIR"; export CLAUDE_PROJECT_DIR="$PROJECT_DIR"; PATH="$PATH:/opt/homebrew/bin:__HOME__/.local/bin"; PYTHON="$SCRIPTS_DIR/.venv/bin/python3"; "$PYTHON" "$SCRIPTS_DIR/weekly_content.py" >> "$LOG_DIR/weekly-content.log" 2>&amp;1</string>
+        <string>PROJECT_DIR="__PROJECT_DIR__"; SCRIPTS_DIR="$PROJECT_DIR/.claude/scripts"; LOG_DIR="__LOG_DIR__"; mkdir -p "$LOG_DIR"; cd "$SCRIPTS_DIR"; export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; export CLAUDE_PROJECT_DIR="$PROJECT_DIR"; PATH="$PATH:/opt/homebrew/bin:__HOME__/.local/bin"; PYTHON="$SCRIPTS_DIR/.venv/bin/python3"; "$PYTHON" "$SCRIPTS_DIR/weekly_content.py" >> "$LOG_DIR/weekly-content.log" 2>&amp;1</string>
     </array>
     <key>StartCalendarInterval</key>
     <dict>

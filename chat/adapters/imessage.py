@@ -80,6 +80,35 @@ def _message_has_content(msg: dict[str, Any]) -> bool:
     return any(_wanted_attachment(a) for a in (msg.get("attachments") or []))
 
 
+# iPhone photos arrive as HEIC, which the agent's Read tool can't open. macOS
+# ships `sips`, so convert in place to JPEG. Videos are left as-is: the agent
+# can't view them either way, but ffmpeg (if installed) can pull frames on demand.
+_HEIC_SUFFIXES = (".heic", ".heif")
+
+
+async def _transcode_if_needed(path: Path, mimetype: str) -> tuple[Path, str]:
+    is_heic = (mimetype or "").lower() in ("image/heic", "image/heif") or \
+        path.suffix.lower() in _HEIC_SUFFIXES
+    if not is_heic:
+        return path, mimetype
+    out = path.with_suffix(".jpg")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "sips", "-s", "format", "jpeg", "-s", "formatOptions", "90",
+            str(path), "--out", str(out),
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+        )
+        _, err = await asyncio.wait_for(proc.communicate(), timeout=60)
+        if proc.returncode == 0 and out.is_file() and out.stat().st_size > 0:
+            path.unlink(missing_ok=True)
+            print(f"[{datetime.now()}] Transcoded HEIC -> {out.name}")
+            return out, "image/jpeg"
+        print(f"[{datetime.now()}] sips failed on {path.name}: {err.decode(errors='ignore')[:120]}")
+    except Exception as e:  # noqa: BLE001 — keep the original if conversion fails
+        print(f"[{datetime.now()}] HEIC transcode error ({path.name}): {e}")
+    return path, mimetype
+
+
 def _normalize_address(addr: str) -> str:
     """Strip spaces, dashes, parens. Leaves + prefix and digits.
     Emails are lower-cased; phone numbers keep their E.164 form."""
@@ -436,9 +465,10 @@ class IMessageAdapter:
                     return None
                 data = await resp.read()
             local_path.write_bytes(data)
+            local_path, mimetype = await _transcode_if_needed(local_path, mimetype)
             print(f"[{datetime.now()}] Downloaded iMessage attachment {filename} -> {local_path}")
-            return Attachment(filename=filename, mimetype=mimetype,
-                              url=str(local_path), size_bytes=len(data))
+            return Attachment(filename=local_path.name, mimetype=mimetype,
+                              url=str(local_path), size_bytes=local_path.stat().st_size)
         except Exception as e:
             print(f"[{datetime.now()}] iMessage attachment error ({filename}): {e}")
             return None
