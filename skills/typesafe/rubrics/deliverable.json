@@ -1,0 +1,82 @@
+{
+  "name": "deliverable",
+  "description": "Any document, report, briefing, or write-up going to Jason, the team, or a client.",
+  "pass_score": 75,
+  "dimensions": {
+    "answers_the_brief": {
+      "weight": 3,
+      "requires_brief": true,
+      "instructions": "How completely does `deliverable` do what `brief` asked for?",
+      "levels": [
+        "Addresses a different task than the one in the brief",
+        "Touches the task but leaves out most of what the brief asked for",
+        "Covers the main request but misses one or more things the brief explicitly asked for",
+        "Covers everything the brief asked for"
+      ]
+    },
+    "leads_with_the_answer": {
+      "weight": 2,
+      "instructions": "How quickly does a reader of `deliverable` reach its main finding or recommendation?",
+      "levels": [
+        "There is no identifiable main finding or recommendation anywhere",
+        "The main finding exists but is buried in the middle or at the end after background",
+        "The main finding appears early but is hedged or mixed in with setup",
+        "The main finding or recommendation is stated plainly in the opening lines"
+      ]
+    },
+    "specificity": {
+      "weight": 2,
+      "instructions": "How specific are the statements in `deliverable`?",
+      "levels": [
+        "Almost entirely generic statements that could apply to any business or situation",
+        "Mostly generic, with a few details specific to this situation",
+        "Mostly specific names, numbers, and facts, with some generic filler",
+        "Consistently specific names, numbers, dates, and facts tied to this situation"
+      ]
+    },
+    "evidence": {
+      "weight": 2,
+      "instructions": "How well are the factual claims and numbers in `deliverable` backed up within the document?",
+      "levels": [
+        "Claims and numbers are asserted with no source, data, or reasoning given",
+        "A few claims name where they come from; most do not",
+        "Most claims name a source, show the data, or give the reasoning behind them",
+        "Every significant claim names its source, shows the data, or gives the reasoning"
+      ]
+    },
+    "actionability": {
+      "weight": 2,
+      "instructions": "How clear is it what the reader of `deliverable` should do next?",
+      "levels": [
+        "No next steps or recommendations are given",
+        "Next steps are vague, such as 'consider improving' or 'look into'",
+        "Next steps are concrete but have no owner, order, or priority",
+        "Next steps are concrete and say who does what, in what order or by when"
+      ]
+    },
+    "clarity": {
+      "weight": 1,
+      "instructions": "How easy is `deliverable` to read for a busy business owner who is not a specialist?",
+      "levels": [
+        "Hard to follow: disorganized, or dense with unexplained jargon",
+        "Followable with effort: long paragraphs, some unexplained jargon, or repetition",
+        "Easy to follow, with minor wordiness or an occasional unexplained term",
+        "Plain language, tightly organized, no wasted words"
+      ]
+    }
+  },
+  "blockers": {
+    "placeholder_text": {
+      "instructions": "Does `deliverable` contain leftover placeholder or template text, such as bracketed fill-ins, 'TODO', 'TBD', 'lorem ipsum', or 'insert X here'?"
+    },
+    "internal_notes_exposed": {
+      "instructions": "Does `deliverable` contain text meant for the author rather than the reader, such as notes to self, AI assistant commentary about producing the document, or prompts and instructions?"
+    },
+    "contradicts_itself": {
+      "instructions": "Does `deliverable` state two facts, numbers, or recommendations that conflict with each other?"
+    },
+    "cuts_off": {
+      "instructions": "Does `deliverable` end abruptly or leave a section visibly unfinished?"
+    }
+  }
+}

@@ -108,3 +108,30 @@ def test_full_engine_preapproves_mcp_and_tells_agent_it_is_unrestricted(
     assert "vercel" in captured["mcp"]
     assert "full read/write access on this Mac" in captured["append"]
     assert captured["add_dirs"] == [str(tmp_path / "Projects" / "locafy-website")]
+
+
+@pytest.mark.parametrize(("key", "advertised"), [("ts-key", True), ("", False)])
+def test_judgment_layer_is_advertised_only_when_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, key: str, advertised: bool
+) -> None:
+    import claude_agent_sdk
+    from claude_agent_sdk import AssistantMessage, TextBlock
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("TYPESAFE_API_KEY", key)
+    captured: dict[str, Any] = {}
+
+    async def fake_query(*, prompt: Any, options: Any) -> Any:
+        captured["append"] = options.system_prompt["append"]
+        yield AssistantMessage(content=[TextBlock(text="ok")], model="m")
+
+    monkeypatch.setattr(claude_agent_sdk, "query", fake_query)
+    engine = ConversationEngine(_Store(), tmp_path, permissions="scoped")  # type: ignore[arg-type]
+    incoming = IncomingMessage(text="hi", user=User(Platform.IMESSAGE, "u"),
+                               channel=Channel(Platform.IMESSAGE, "c"), platform=Platform.IMESSAGE)
+
+    async def run() -> list[OutgoingMessage]:
+        return [o async for o in engine.handle_message(incoming)]
+
+    asyncio.run(run())
+    assert ("Judgment Layer" in captured["append"]) is advertised

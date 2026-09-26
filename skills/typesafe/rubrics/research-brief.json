@@ -1,0 +1,69 @@
+{
+  "name": "research-brief",
+  "description": "A research summary or analysis. Put the research question in --brief.",
+  "pass_score": 75,
+  "dimensions": {
+    "answers_the_question": {
+      "weight": 3,
+      "requires_brief": true,
+      "instructions": "`brief` is the research question. How directly does `deliverable` answer it?",
+      "levels": [
+        "Does not answer the question",
+        "Presents related information but leaves the reader to work out the answer",
+        "Answers the question but only partly, or only for some cases",
+        "Gives a direct, complete answer to the question"
+      ]
+    },
+    "sourcing": {
+      "weight": 3,
+      "instructions": "How well does `deliverable` show where its findings come from?",
+      "levels": [
+        "No sources are named",
+        "Sources are mentioned in general terms, such as 'studies show' or 'experts say'",
+        "Most findings name a specific source",
+        "Every significant finding names a specific source a reader could look up"
+      ]
+    },
+    "separates_fact_from_inference": {
+      "weight": 2,
+      "instructions": "How clearly does `deliverable` distinguish what was found from what is assumed or inferred?",
+      "levels": [
+        "Guesses and findings are presented the same way, all as fact",
+        "Occasionally signals uncertainty but mostly presents inferences as fact",
+        "Usually marks which statements are findings and which are inference or estimate",
+        "Consistently marks findings, inferences, and unknowns as such"
+      ]
+    },
+    "so_what": {
+      "weight": 2,
+      "instructions": "How well does `deliverable` explain what the findings mean for the reader's decision?",
+      "levels": [
+        "Lists findings with no interpretation",
+        "Offers a generic takeaway not tied to the reader's situation",
+        "Explains what the findings mean for the reader's situation",
+        "Explains what the findings mean and recommends a specific decision or action"
+      ]
+    },
+    "balance": {
+      "weight": 1,
+      "instructions": "How well does `deliverable` handle evidence that cuts against its conclusion?",
+      "levels": [
+        "Presents only evidence for one side",
+        "Mentions that other views exist without describing them",
+        "Describes the main counter-evidence or risk",
+        "Describes the counter-evidence and explains why the conclusion holds anyway or where it might not"
+      ]
+    }
+  },
+  "blockers": {
+    "contradicts_itself": {
+      "instructions": "Does `deliverable` state two facts, numbers, or conclusions that conflict with each other?"
+    },
+    "placeholder_text": {
+      "instructions": "Does `deliverable` contain leftover placeholder text, such as bracketed fill-ins, 'TODO', 'TBD', or 'citation needed'?"
+    },
+    "cuts_off": {
+      "instructions": "Does `deliverable` end abruptly or leave a section visibly unfinished?"
+    }
+  }
+}
