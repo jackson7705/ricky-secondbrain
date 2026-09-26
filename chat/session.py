@@ -9,6 +9,19 @@ from datetime import datetime
 from pathlib import Path
 
 
+# Turn-history limits. The recap injected after a session rotation is built
+# from these rows, so they stay short on purpose: enough to disambiguate a
+# one-word follow-up, not a transcript.
+TURN_HISTORY_KEEP = 12
+TURN_USER_CHARS = 500
+TURN_REPLY_CHARS = 700
+
+
+def _clip(text: str, limit: int) -> str:
+    text = (text or "").strip()
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
 @dataclass
 class Session:
     """Represents a chat session tied to a platform thread."""
@@ -73,7 +86,42 @@ class SQLiteSessionStore:
                 );
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_hb_channel_thread
                     ON heartbeat_threads(channel_id, thread_ts);
+                CREATE TABLE IF NOT EXISTS chat_turns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    user_text TEXT NOT NULL,
+                    reply_text TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_turns_session
+                    ON chat_turns(session_id, id);
             """)
+
+    def append_turn(self, session_id: str, user_text: str, reply_text: str) -> None:
+        """Log one completed exchange (truncated) so a rotated session can be
+        given a recap. Keeps the last `TURN_HISTORY_KEEP` rows per session."""
+        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+            conn.execute(
+                "INSERT INTO chat_turns (session_id, created_at, user_text, reply_text) "
+                "VALUES (?, ?, ?, ?)",
+                (session_id, datetime.now().isoformat(timespec="seconds"),
+                 _clip(user_text, TURN_USER_CHARS), _clip(reply_text, TURN_REPLY_CHARS)),
+            )
+            conn.execute(
+                "DELETE FROM chat_turns WHERE session_id = ? AND id NOT IN ("
+                "SELECT id FROM chat_turns WHERE session_id = ? ORDER BY id DESC LIMIT ?)",
+                (session_id, session_id, TURN_HISTORY_KEEP),
+            )
+
+    def recent_turns(self, session_id: str, limit: int = 6) -> list[tuple[str, str, str]]:
+        """Most recent exchanges for a session, oldest first: (ts, user, reply)."""
+        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+            rows = conn.execute(
+                "SELECT created_at, user_text, reply_text FROM chat_turns "
+                "WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+                (session_id, limit),
+            ).fetchall()
+        return [(r[0], r[1], r[2]) for r in reversed(rows)]
 
     def _row_to_session(self, row: sqlite3.Row) -> Session:
         """Convert a database row to a Session object."""
@@ -243,6 +291,48 @@ class PostgresSessionStore:
             CREATE UNIQUE INDEX IF NOT EXISTS idx_hb_channel_thread
                 ON heartbeat_threads(channel_id, thread_ts)
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS chat_turns (
+                id SERIAL PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                user_text TEXT NOT NULL,
+                reply_text TEXT NOT NULL
+            )
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_turns_session ON chat_turns(session_id, id)
+        """)
+
+    def append_turn(self, session_id: str, user_text: str, reply_text: str) -> None:
+        """Log one completed exchange; keep the last TURN_HISTORY_KEEP per session."""
+        cur = self._conn.cursor()
+        cur.execute(
+            "INSERT INTO chat_turns (session_id, created_at, user_text, reply_text) "
+            "VALUES (%s, %s, %s, %s)",
+            (session_id, datetime.now(),
+             _clip(user_text, TURN_USER_CHARS), _clip(reply_text, TURN_REPLY_CHARS)),
+        )
+        cur.execute(
+            "DELETE FROM chat_turns WHERE session_id = %s AND id NOT IN ("
+            "SELECT id FROM chat_turns WHERE session_id = %s ORDER BY id DESC LIMIT %s)",
+            (session_id, session_id, TURN_HISTORY_KEEP),
+        )
+
+    def recent_turns(self, session_id: str, limit: int = 6) -> list[tuple[str, str, str]]:
+        """Most recent exchanges for a session, oldest first: (ts, user, reply)."""
+        cur = self._conn.cursor()
+        cur.execute(
+            "SELECT created_at, user_text, reply_text FROM chat_turns "
+            "WHERE session_id = %s ORDER BY id DESC LIMIT %s",
+            (session_id, limit),
+        )
+        rows = cur.fetchall()
+        out = []
+        for ts, u, r in reversed(rows):
+            ts_str = ts.isoformat(timespec="seconds") if isinstance(ts, datetime) else str(ts)
+            out.append((ts_str, u, r))
+        return out
 
     def _row_to_session(self, row: tuple) -> Session:
         """Convert a database row to a Session object."""

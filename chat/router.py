@@ -15,6 +15,13 @@ class ChatRouter:
 
     Handles concurrent message processing — each incoming message spawns
     its own task so multiple conversations can run simultaneously.
+
+    Within ONE conversation (same platform:channel:thread) turns run strictly
+    in arrival order. Before this, two texts sent a minute apart ("Not in
+    ClickUp", "Looking for non stop") became two parallel agent runs resuming
+    the same SDK session: each answered the first message in full, neither saw
+    the other, and side effects doubled (duplicate ClickUp tasks, a receipt
+    filed twice — observed 2026-09-24/25).
     """
 
     def __init__(
@@ -27,6 +34,20 @@ class ChatRouter:
         self.engine = engine
         self.progress_interval_seconds = progress_interval_seconds
         self.adapters: dict[Platform, Any] = {}
+        self._conversation_locks: dict[str, asyncio.Lock] = {}
+
+    @staticmethod
+    def conversation_key(incoming: Any) -> str:
+        """Same key the engine uses for its session row."""
+        thread_id = incoming.thread.thread_id if incoming.thread else incoming.channel.platform_id
+        return f"{incoming.platform.value}:{incoming.channel.platform_id}:{thread_id}"
+
+    def _lock_for(self, incoming: Any) -> asyncio.Lock:
+        key = self.conversation_key(incoming)
+        lock = self._conversation_locks.get(key)
+        if lock is None:
+            lock = self._conversation_locks[key] = asyncio.Lock()
+        return lock
 
     def register(self, adapter: Any) -> None:
         """Register a platform adapter."""
@@ -62,12 +83,26 @@ class ChatRouter:
             print(f"[{datetime.now()}] Listener error ({adapter.platform.value}): {e}")
 
     async def _handle(self, adapter: Any, incoming: Any) -> None:
-        """Handle a single incoming message: post placeholder, run engine, update."""
+        """Handle a single incoming message: post placeholder, run engine, update.
+
+        Turns in the same conversation are serialized (see class docstring);
+        different conversations still run concurrently.
+        """
         print(
             f"[{datetime.now()}] Message from {incoming.user.platform_id} "
             f"in {incoming.channel.platform_id}: {incoming.text[:80]}..."
         )
 
+        lock = self._lock_for(incoming)
+        if lock.locked():
+            print(
+                f"[{datetime.now()}] Conversation {self.conversation_key(incoming)} busy — "
+                "queuing this message behind the in-flight turn"
+            )
+        async with lock:
+            await self._handle_turn(adapter, incoming)
+
+    async def _handle_turn(self, adapter: Any, incoming: Any) -> None:
         # Post "Thinking..." placeholder
         placeholder_id: str | None = None
         try:

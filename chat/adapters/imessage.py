@@ -23,13 +23,61 @@ import asyncio
 import json
 import re
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 import aiohttp
 
-from models import Channel, IncomingMessage, OutgoingMessage, Platform, Thread, User
+from models import Attachment, Channel, IncomingMessage, OutgoingMessage, Platform, Thread, User
+
+# Same dated inbox folder the Slack adapter uses, so the agent's Read/Bash
+# tools find both surfaces' uploads in one place: <SecondBrain>/inbox/<date>/
+INBOX_DIR = Path(__file__).resolve().parent.parent.parent.parent / "inbox"
+
+# What we bother downloading from an iMessage. Images (screenshots of a punch
+# list), PDFs and office docs (receipts, invoices, contracts). Anything else —
+# stickers, vCards, audio, executables — is noted in the prompt but not fetched.
+_ATTACHMENT_MIME_PREFIXES = ("image/", "application/pdf", "text/")
+_ATTACHMENT_MIME_EXACT = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/msword",
+    "application/vnd.ms-excel",
+    "text/csv",
+}
+_MAX_ATTACHMENT_BYTES = 40 * 1024 * 1024
+
+
+def _wanted_attachment(att: dict[str, Any]) -> bool:
+    """True if this BlueBubbles attachment record is worth downloading."""
+    if att.get("isSticker") or att.get("hideAttachment"):
+        return False
+    if not att.get("guid"):
+        return False
+    mime = (att.get("mimeType") or "").lower()
+    if not mime:
+        # Some carriers strip the type; fall back to the file extension.
+        name = (att.get("transferName") or "").lower()
+        return name.endswith((".png", ".jpg", ".jpeg", ".heic", ".gif", ".webp", ".pdf",
+                              ".docx", ".xlsx", ".pptx", ".csv", ".txt"))
+    if mime.startswith(_ATTACHMENT_MIME_PREFIXES) or mime in _ATTACHMENT_MIME_EXACT:
+        size = att.get("totalBytes") or 0
+        return not size or size <= _MAX_ATTACHMENT_BYTES
+    return False
+
+
+def _message_has_content(msg: dict[str, Any]) -> bool:
+    """A message is worth handling if it has text OR a downloadable attachment.
+
+    Before 2026-09-26 the poller dropped any message whose text was blank, so a
+    receipt photo or a screenshot sent without a caption vanished, and one sent
+    WITH a caption ("Fix these", "File") arrived as bare text. Two in a row.
+    """
+    if (msg.get("text") or "").strip():
+        return True
+    return any(_wanted_attachment(a) for a in (msg.get("attachments") or []))
 
 
 def _normalize_address(addr: str) -> str:
@@ -263,7 +311,7 @@ class IMessageAdapter:
                 "offset": 0,
                 "sort": "ASC",
                 "after": after_ms,
-                "with": ["handle", "chats", "chat.participants"],
+                "with": ["handle", "chats", "chat.participants", "attachment"],
             },
             timeout=aiohttp.ClientTimeout(total=15),
         ) as resp:
@@ -290,9 +338,9 @@ class IMessageAdapter:
             if msg.get("itemType") and msg["itemType"] != 0:
                 continue
 
-            text = msg.get("text") or ""
-            if not text.strip():
+            if not _message_has_content(msg):
                 continue
+            text = msg.get("text") or ""
 
             sender_handle = (msg.get("handle") or {}).get("address") or ""
             normalized_sender = _normalize_address(sender_handle)
@@ -313,6 +361,26 @@ class IMessageAdapter:
             participants = chat.get("participants") or [{"address": sender_handle}]
             is_dm = len([p for p in participants if p.get("address")]) <= 1
 
+            attachments: list[Attachment] = []
+            skipped: list[str] = []
+            for att in msg.get("attachments") or []:
+                if not _wanted_attachment(att):
+                    skipped.append(att.get("transferName") or att.get("mimeType") or "attachment")
+                    continue
+                downloaded = await self._download_attachment(att)
+                if downloaded:
+                    attachments.append(downloaded)
+                else:
+                    skipped.append(att.get("transferName") or "attachment")
+            if not text.strip():
+                # Caption-less photo/PDF: give the agent something to act on.
+                text = f"[The user sent {len(attachments)} attachment(s) with no text.]"
+            if skipped:
+                text += (
+                    f"\n\n[{len(skipped)} attachment(s) could not be fetched: "
+                    + ", ".join(skipped[:5]) + "]"
+                )
+
             incoming = IncomingMessage(
                 text=text,
                 user=User(Platform.IMESSAGE, normalized_sender, display_name=sender_handle),
@@ -325,6 +393,7 @@ class IMessageAdapter:
                 platform=Platform.IMESSAGE,
                 thread=Thread(thread_id=chat_guid),
                 platform_message_id=msg.get("guid") or "",
+                attachments=attachments,
                 timestamp=_ms_to_dt(ts),
                 raw_event=msg,
             )
@@ -335,6 +404,44 @@ class IMessageAdapter:
             self._save_last_seen(newest_ts)
 
     # ── Helpers ─────────────────────────────────────────────────────────
+
+    async def _download_attachment(self, att: dict[str, Any]) -> Attachment | None:
+        """Fetch one attachment from BlueBubbles and save it under inbox/<date>/.
+
+        BlueBubbles serves the original bytes at
+        GET /api/v1/attachment/:guid/download?password=... — HEIC and friends
+        come back as-is (no server-side conversion requested), which the
+        agent's Read tool handles.
+        """
+        assert self._session is not None
+        guid = att.get("guid") or ""
+        filename = att.get("transferName") or f"{guid}.bin"
+        mimetype = att.get("mimeType") or "application/octet-stream"
+
+        inbox = INBOX_DIR / date.today().isoformat()
+        safe_name = re.sub(r"[^\w.\-]", "_", filename)
+        local_path = inbox / f"{datetime.now().strftime('%H%M%S')}_{safe_name}"
+        try:
+            inbox.mkdir(parents=True, exist_ok=True)
+            async with self._session.get(
+                f"{self.base_url}/api/v1/attachment/{guid}/download",
+                params={"password": self.password},
+                timeout=aiohttp.ClientTimeout(total=120),
+            ) as resp:
+                if resp.status != 200:
+                    print(
+                        f"[{datetime.now()}] iMessage attachment download failed "
+                        f"{resp.status}: {filename}"
+                    )
+                    return None
+                data = await resp.read()
+            local_path.write_bytes(data)
+            print(f"[{datetime.now()}] Downloaded iMessage attachment {filename} -> {local_path}")
+            return Attachment(filename=filename, mimetype=mimetype,
+                              url=str(local_path), size_bytes=len(data))
+        except Exception as e:
+            print(f"[{datetime.now()}] iMessage attachment error ({filename}): {e}")
+            return None
 
     def _is_allowed(self, normalized_sender: str) -> bool:
         if not self.allowed_addresses:

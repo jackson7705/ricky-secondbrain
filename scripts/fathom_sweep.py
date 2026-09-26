@@ -3,7 +3,9 @@
 as ClickUp tasks so meeting to-dos never slip. Fathom already extracts the action
 items (structured), so no LLM needed here. Dedupes; reports via iMessage.
 
-DRY-RUN by default. `--apply` auto-creates the tasks + texts Jason.
+DRY-RUN by default. `--apply` proposes the items to the owner (TASK_FILING_MODE=propose,
+default — nothing is filed until they reply "add N"; see pending_tasks.py) or, with
+TASK_FILING_MODE=auto, creates the ClickUp tasks first and announces after.
 
     uv run python fathom_sweep.py --dry-run
     uv run python fathom_sweep.py --apply
@@ -109,6 +111,9 @@ def main(dry_run: bool) -> int:
                           "url": a.get("recording_playback_url") or "", "assignee": name})
 
     existing = _existing_task_names()
+    from pending_tasks import PendingTasks
+    pending = PendingTasks()
+    existing = existing + pending.known_titles()  # proposed/approved/rejected count as seen
     fresh = [it for it in items if not _is_dupe(it["desc"], existing, sigs)]
     print(f"pulled {len(items)} open action item(s) from meetings (last {LOOKBACK_DAYS}d); "
           f"{len(fresh)} new after dedup:\n")
@@ -118,6 +123,30 @@ def main(dry_run: bool) -> int:
 
     if dry_run:
         print("\n(DRY-RUN — no tasks created.)")
+        return 0
+
+    from config import TASK_FILING_MODE
+    if TASK_FILING_MODE == "propose":
+        # Propose + notify; ClickUp is only written by pending_tasks.py on approval.
+        proposals = [{
+            "title": it["desc"][:120],
+            "note": f"From meeting '{it['meeting']}' ({it['date']} @ {it['ts']})"
+                    + (f"\nFathom assignee: {it['assignee']}" if it["assignee"] else ""),
+            "source": f"Fathom: {it['meeting']}",
+            "url": it["url"],
+            "meeting": it["meeting"],
+        } for it in fresh]
+        added = pending.propose(proposals, origin="fathom")
+        pending.save()
+        DATA.mkdir(parents=True, exist_ok=True)
+        st["last_run"] = datetime.now().isoformat(timespec="seconds")
+        STATE.write_text(json.dumps(st, indent=2))
+        print(f"\nproposed {len(added)} task(s) — awaiting owner approval "
+              "(TASK_FILING_MODE=propose)")
+        if added:
+            from notify_owner import notify_owner
+            from pending_tasks import format_proposal
+            notify_owner(format_proposal(added, "your meetings (Fathom)")[:1400])
         return 0
 
     from integrations.clickup_api import create_task

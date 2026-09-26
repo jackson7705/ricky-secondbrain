@@ -114,6 +114,14 @@ CLICKUP_LIST_IDS = [s.strip() for s in os.getenv("CLICKUP_LIST_IDS", "").split("
 # jobs (loose_ends, fathom_sweep) file captured to-dos. Per-owner — set in .env.
 CLICKUP_OWNER_UID = os.getenv("CLICKUP_OWNER_UID", "").strip()
 CLICKUP_INBOX_LIST_ID = os.getenv("CLICKUP_INBOX_LIST_ID", "").strip()
+# How autonomous jobs hand captured to-dos to the owner:
+#   propose (default) — text a numbered list; nothing is created until the owner
+#                       replies "add 12, 14" / "add all" (see pending_tasks.py).
+#   auto              — legacy: create the ClickUp tasks first, announce after.
+# Owner's standing instruction since 2026-09-17 is "ask me first", hence the default.
+TASK_FILING_MODE = os.getenv("TASK_FILING_MODE", "propose").strip().lower() or "propose"
+if TASK_FILING_MODE not in ("propose", "auto"):
+    TASK_FILING_MODE = "propose"
 
 # LinkedIn (aeo-authority-content publish path)
 LINKEDIN_CLIENT_ID = os.getenv("LINKEDIN_CLIENT_ID", "")

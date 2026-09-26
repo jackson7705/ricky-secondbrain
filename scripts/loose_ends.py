@@ -2,8 +2,10 @@
 """loose_ends.py — catch action items from Jason's inbox and file them as ClickUp
 tasks so nothing slips through. Dedupes against existing tasks; reports via iMessage.
 
-DRY-RUN by default (extract + show, create nothing). `--apply` auto-creates the tasks
-and texts Jason a summary.
+DRY-RUN by default (extract + show, create nothing). `--apply` hands the items to the
+owner: with TASK_FILING_MODE=propose (default) it texts a numbered proposal and files
+NOTHING until they reply "add 12, 14" (see pending_tasks.py); with TASK_FILING_MODE=auto
+it creates the ClickUp tasks first and announces after (legacy behaviour).
 
 Scope note: the inbox half is fully automated here. Fathom meetings are NOT scriptable
 in this setup (no Fathom MCP wired) — `meeting-concierge` covers those semi-manually.
@@ -148,6 +150,11 @@ def main(dry_run: bool) -> int:
     print(f"scanned {len(emails)} new inbox emails ({', '.join(ACCOUNTS)}, last {LOOKBACK_HOURS}h)")
     items = _extract(emails)
     existing = _existing_task_names()
+    from pending_tasks import PendingTasks
+    pending = PendingTasks()
+    # Anything already proposed / approved / rejected via the approval gate
+    # counts as seen too, so a skipped proposal isn't re-proposed next sweep.
+    existing = existing + pending.known_titles()
 
     fresh = []
     for it in items:
@@ -165,7 +172,23 @@ def main(dry_run: bool) -> int:
         print("\n(DRY-RUN — no tasks created.)")
         return 0
 
-    # --apply: create tasks + report
+    from config import TASK_FILING_MODE
+    if TASK_FILING_MODE == "propose":
+        # --apply in propose mode: queue proposals + text a numbered list.
+        # Nothing touches ClickUp until the owner says "add N" (pending_tasks.py).
+        added = pending.propose(fresh, origin="inbox")
+        pending.save()
+        st["last_run"] = datetime.now().isoformat(timespec="seconds")
+        _save_state(st)
+        print(f"\nproposed {len(added)} task(s) — awaiting owner approval "
+              "(TASK_FILING_MODE=propose)")
+        if added:
+            from notify_owner import notify_owner
+            from pending_tasks import format_proposal
+            notify_owner(format_proposal(added, "your inbox")[:1400])
+        return 0
+
+    # --apply in auto mode (legacy): create tasks + report
     from integrations.clickup_api import create_task
     created = []
     for it in fresh:

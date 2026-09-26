@@ -78,6 +78,10 @@ _LARGE_TASK_INTENT_RE = re.compile(
     r"\b(?:"
     r"playbook|handbook|website|web\s+app|application|migration|"
     r"full\s+audit|deep\s+research|"
+    # Code work: clone + fix + verify + PR routinely goes quiet for >10 min
+    # while a build or test run is in flight (aborted 2026-09-24 on the
+    # airsense repo fix).
+    r"repo(?:sitory)?|codebase|pull\s+request|"
     r"comprehensive\s+(?:analysis|report|plan|strategy)|"
     r"(?:big|large|long[- ]running|multi[- ]step|end[- ]to[- ]end)\s+"
     r"(?:job|task|project|build|request)"
@@ -247,20 +251,50 @@ class ConversationEngine:
     )
 
     @staticmethod
-    def _build_attachment_context(attachments: list[Attachment]) -> str:
-        """Build a context string describing attached images for the prompt."""
+    def _build_attachment_context(attachments: list[Attachment], platform: str = "chat") -> str:
+        """Build a context string describing attached files for the prompt."""
         if not attachments:
             return ""
 
-        lines = ["\n\n[ATTACHED FILES from user via Slack:]"]
+        lines = [f"\n\n[ATTACHED FILES from user via {platform}:]"]
         for att in attachments:
             local_path = att.url  # local file path stored in url field
             lines.append(f"- {att.filename} ({att.mimetype}) saved at: {local_path}")
         lines.append(
-            "You can use the Read tool to view these images, or pass their paths "
-            "to image generation scripts as --ref or --style arguments."
+            "These files ARE the content of the message when the text is short "
+            "(\"file this\", \"fix these\"). Open them first: the Read tool shows images and "
+            "PDFs directly; use `pdftotext` or the `pdf` skill for long PDFs. Image paths can "
+            "also be passed to image generation scripts as --ref or --style arguments. "
+            "Never reply that nothing was attached."
         )
         return "\n".join(lines)
+
+    @staticmethod
+    def _build_recent_turns_context(turns: list[tuple[str, str, str]]) -> str:
+        """Compact recap of the previous underlying session for a fresh one.
+
+        Session rotation (every `rotate_after_messages` turns) used to start
+        the agent completely cold: a one-word follow-up like "Vercel" a minute
+        after "Verbal is locafy sept" got treated as a brand-new topic, and
+        requests that were still open ("Scribe receipt", "Meta pixel doc")
+        silently fell through. Carry the last few exchanges across as data.
+        """
+        if not turns:
+            return ""
+        lines = []
+        for ts, user_text, reply_text in turns:
+            when = ts[:16].replace("T", " ")
+            lines.append(f"[{when}] USER: {user_text.strip()}")
+            if reply_text.strip():
+                lines.append(f"[{when}] RICKY: {reply_text.strip()}")
+        body = wrap_external_data("\n".join(lines), "previous_conversation_recap")
+        return (
+            "[CONTEXT: This is a fresh agent session, but the conversation with the user "
+            "is continuous. Recap of the most recent exchanges from the previous session, "
+            "oldest first. Treat short follow-ups as continuing the last topic, and keep "
+            "any still-open requests in mind.\n"
+            f"{body}\n{TRUST_BOUNDARY_INSTRUCTION}]\n\n"
+        )
 
     @staticmethod
     def _extract_attachment_paths(text: str) -> list[tuple[str, str]]:
@@ -339,6 +373,10 @@ class ConversationEngine:
         thread_id = message.thread.thread_id if message.thread else message.channel.platform_id
         platform_str = message.platform.value
         channel_id = message.channel.platform_id
+
+        # Keep the user's own words for the turn log before any directive or
+        # context gets prepended.
+        original_user_text = message.text
 
         # Classify from the original user text. Injected directives contain
         # deliverable keywords and must not influence runtime policy selection.
@@ -426,6 +464,28 @@ class ConversationEngine:
                     "- Dumping the full markdown into the chat instead of producing a file.\n"
                     "- Producing the file but sending the local path. Local paths don't "
                     "open on his phone; Drive links do. Confirmed 2026-06-03.\n"
+                    "\n## Task Filing Gate — ClickUp Is Opt-In\n"
+                    "The owner's standing instruction (2026-09-17): nothing goes on his "
+                    "ClickUp list without a numbered proposal and an explicit yes. So:\n"
+                    "- NEVER call `create_task` (or any ClickUp write) as a side effect of "
+                    "another request. If a task seems worth tracking, END your reply with a "
+                    "short numbered proposal ('Want these in ClickUp? 1. ... 2. ...') and "
+                    "file only what he approves on the next turn.\n"
+                    "- 'Not in ClickUp' / 'don't add that' means exactly that — do the work "
+                    "without creating a task, and don't offer again in the same thread.\n"
+                    "- Scheduled jobs (inbox sweep, Fathom sweep) send PROPOSALS numbered "
+                    "with stable ids like #12. When he replies 'add 12, 14', 'add all', "
+                    "'skip 13' or 'skip all', run from `.claude/scripts`: "
+                    "`uv run python pending_tasks.py approve 12 14` / `approve all` / "
+                    "`reject 13` / `reject all`, then confirm what was filed with links. "
+                    "`uv run python pending_tasks.py list` shows what is still pending.\n"
+                    "- A thumbs-up or 'liked' reaction is not approval. Words are.\n"
+                    "\n## Follow-ups Continue the Last Topic\n"
+                    "A one- or two-word message ('Vercel', 'File', 'Yes', 'Approve') almost "
+                    "always refers to whatever was just being discussed or proposed. Resolve "
+                    "it against the recent conversation before treating it as a new request, "
+                    "and if two readings are plausible, take the one that continues the thread."
+                    "\n"
                 ),
             },
             "mcp_servers": _load_apify_mcp(),
@@ -504,8 +564,21 @@ class ConversationEngine:
                 )
                 print(f"[{datetime.now()}] Injected heartbeat context into session")
 
-        # Append attachment context (images sent via Slack)
-        attachment_ctx = self._build_attachment_context(message.attachments)
+            # Rotated (or otherwise restarted) conversation: carry the tail of
+            # the previous underlying session across so the agent isn't cold.
+            if existing is not None:
+                try:
+                    recent = self.session_store.recent_turns(existing.session_id, limit=6)
+                except Exception as exc:  # noqa: BLE001 — store without turn history
+                    recent = []
+                    print(f"[{datetime.now()}] recent_turns unavailable: {exc}")
+                recap = self._build_recent_turns_context(recent)
+                if recap:
+                    message.text = recap + message.text
+                    print(f"[{datetime.now()}] Injected {len(recent)} previous turn(s) as recap")
+
+        # Append attachment context (files sent via Slack / iMessage / etc.)
+        attachment_ctx = self._build_attachment_context(message.attachments, platform_str)
         if attachment_ctx:
             message.text += attachment_ctx
             print(f"[{datetime.now()}] Injected {len(message.attachments)} attachment(s) into prompt")
@@ -667,6 +740,11 @@ class ConversationEngine:
         # Persist session
         if session_id_from_sdk:
             now = datetime.now()
+            session_key = f"{platform_str}:{channel_id}:{thread_id}"
+            try:
+                self.session_store.append_turn(session_key, original_user_text, response_text)
+            except Exception as exc:  # noqa: BLE001 — turn log is best-effort
+                print(f"[{datetime.now()}] append_turn failed: {exc}")
             if existing:
                 existing.agent_session_id = session_id_from_sdk
                 existing.message_count += 1
