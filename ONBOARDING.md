@@ -86,6 +86,7 @@ The file itself documents every key; the essentials:
 | `DRIVE_BRIEFINGS_FOLDER_ID` | Drive folder id (from its URL) where Ricky uploads docs |
 | `CLICKUP_API_TOKEN` | ClickUp → Settings → Apps → Generate (`pk_…`) |
 | `CLICKUP_WORKSPACE_ID` / `CLICKUP_OWNER_UID` / `CLICKUP_INBOX_LIST_ID` | Workspace + their user id + Inbox list id |
+| `CHAT_PERMISSIONS` | `full` (default: any repo under `~/Projects`, any MCP server, writes anywhere but credential files) or `scoped` (own `scripts/` + allowlisted repos on code turns) |
 | `TASK_FILING_MODE` | `propose` (default: numbered proposals, owner approves with "add 12, 14") or `auto` (file first, announce after) |
 
 ---

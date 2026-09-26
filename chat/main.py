@@ -40,6 +40,7 @@ from config import (  # noqa: E402
     CHAT_MAX_BUDGET_USD,
     CHAT_MAX_TURNS,
     CHAT_MODEL,
+    CHAT_PERMISSIONS,
     CHAT_PROGRESS_INTERVAL_SECONDS,
     CODE_REPO_ALLOWLIST,
     DISCORD_ALLOWED_USER_IDS,
@@ -151,6 +152,7 @@ def main() -> None:
     print(f"  Model:         {CHAT_MODEL} (heavy: {CHAT_HEAVY_MODEL or 'off'})")
     print(f"  CLI:           {CHAT_CLI_PATH or 'SDK bundled (no Claude 5 models)'}")
     print(f"  Code repos:    {', '.join(CODE_REPO_ALLOWLIST) or 'none'} (under {REPO_WORKSPACE_ROOT})")
+    print(f"  Permissions:   {CHAT_PERMISSIONS}")
     print(f"  Chat surfaces: {', '.join(surfaces)}")
     print(f"{'=' * 60}\n")
 
@@ -173,6 +175,7 @@ def main() -> None:
             heavy_model=CHAT_HEAVY_MODEL,
             repo_workspace_root=REPO_WORKSPACE_ROOT,
             code_repo_allowlist=CODE_REPO_ALLOWLIST,
+            permissions=CHAT_PERMISSIONS,
         )
         print("  Engine OK")
         router = ChatRouter(engine, progress_interval_seconds=CHAT_PROGRESS_INTERVAL_SECONDS)
@@ -196,6 +199,7 @@ def main() -> None:
         heavy_model=CHAT_HEAVY_MODEL,
         repo_workspace_root=REPO_WORKSPACE_ROOT,
         code_repo_allowlist=CODE_REPO_ALLOWLIST,
+        permissions=CHAT_PERMISSIONS,
     )
     router = ChatRouter(engine, progress_interval_seconds=CHAT_PROGRESS_INTERVAL_SECONDS)
     _build_adapters(router, store)

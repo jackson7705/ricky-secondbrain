@@ -31,13 +31,20 @@ from sanitize import TRUST_BOUNDARY_INSTRUCTION, wrap_external_data  # noqa: E40
 # scheduled pipeline and the chat agent share one Apify wiring. Token stays
 # in-process, never logged. Returns {} if apify isn't configured, so the
 # engine degrades gracefully to WebSearch rather than crashing.
-def _load_apify_mcp() -> dict:
+_SCOPED_MCP_SERVERS = ("apify", "redis-iris")
+
+
+def _load_mcp_servers(permissions: str = "scoped") -> dict:
     """Pull MCP servers from ~/.claude.json for the chat agent.
 
+    scoped: only
     - `apify`: short-form/social scraping for content-research.
     - `redis-iris`: Context Retriever query tools over the structured data
       (invoices/vendors/clients) — the additive Redis Iris layer alongside the
       Obsidian vault. See .claude/scripts/redis_iris/.
+    full: every server the owner has configured (Vercel, Cloudflare, ClickUp, …),
+    so a request from the phone is never met with "outside scope" — that wall
+    is what blocked the Vercel MCP tools on 2026-09-24.
     Returns {} for any server that isn't configured, so the engine degrades
     gracefully rather than crashing.
     """
@@ -45,8 +52,14 @@ def _load_apify_mcp() -> dict:
         cfg = json.load(open(os.path.expanduser("~/.claude.json")))
     except (OSError, ValueError):
         return {}
-    servers = cfg.get("mcpServers", {})
-    return {name: servers[name] for name in ("apify", "redis-iris") if servers.get(name)}
+    servers = cfg.get("mcpServers", {}) or {}
+    if permissions == "full":
+        return {name: spec for name, spec in servers.items() if spec}
+    return {name: servers[name] for name in _SCOPED_MCP_SERVERS if servers.get(name)}
+
+
+def _load_apify_mcp() -> dict:  # back-compat alias
+    return _load_mcp_servers("scoped")
 
 
 # ── Task runtime profiles ────────────────────────────────────────────────
@@ -133,8 +146,15 @@ _FILE_WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 _NEVER_WRITABLE_RE = re.compile(r"(\.env($|\.)|credentials\.json|_token\.json|\.pem$|\.key$)", re.IGNORECASE)
 
 
-def _make_permission_callback(scripts_dir: Path):
-    """Allow Ricky to edit its own scripts/ — nothing else.
+def _make_permission_callback(scripts_dir: Path, permissions: str = "scoped"):
+    """Decide what the CLI would otherwise prompt on.
+
+    full (default since 2026-09-26): allow everything except writes to secret
+    files (.env, credentials, tokens, keys) — the owner drives Ricky from a
+    phone and asked for no blockers. The dangerous-command Bash hook and the
+    block-secrets hook keep running underneath.
+
+    scoped: allow Ricky to edit its own scripts/ — nothing else.
 
     Claude Code hard-codes `.claude/**` as sensitive, exempting only skills,
     agents, commands, worktrees, and scheduled_tasks.json (verified against CLI
@@ -153,6 +173,14 @@ def _make_permission_callback(scripts_dir: Path):
 
     async def can_use_tool(tool_name: str, tool_input: dict[str, Any], context: Any) -> Any:
         raw = tool_input.get("file_path") or tool_input.get("path") or ""
+        if permissions == "full":
+            is_secret = bool(raw) and _NEVER_WRITABLE_RE.search(Path(str(raw)).name)
+            if tool_name in _FILE_WRITE_TOOLS and is_secret:
+                return PermissionResultDeny(
+                    message=f"{tool_name} on {raw} refused: credential files are never "
+                            "written from chat. Ask the owner to edit them by hand."
+                )
+            return PermissionResultAllow()
         if tool_name in _FILE_WRITE_TOOLS and raw:
             target = Path(str(raw)).expanduser()
             try:
@@ -177,15 +205,34 @@ def _repo_dirs_for(
     text: str,
     workspace_root: Path,
     allowlist: list[str],
+    permissions: str = "scoped",
 ) -> list[str]:
-    """Allowlisted repos this turn may write to, as absolute paths.
+    """Repos this turn may work in, as absolute paths.
 
-    Granted when the turn looks like code work, or when the message names a
-    repo outright ("check locafy-website"). Ordinary turns get nothing — a
-    calendar question has no business holding write access to the Locafy repos.
-    Repos that aren't cloned locally are skipped rather than passed through;
-    the SDK rejects directories that don't exist.
+    full: every directory under the workspace root, plus any allowlisted repo,
+    on every turn — "edit a repo or something with no blockers". A repo named
+    in the message but not cloned is still reported so Ricky can clone it.
+
+    scoped: allowlisted repos only, granted when the turn looks like code work
+    or when the message names a repo outright ("check locafy-website").
+    Ordinary turns get nothing — a calendar question has no business holding
+    write access to the Locafy repos. Repos that aren't cloned locally are
+    skipped rather than passed through; the SDK rejects missing directories.
     """
+    if permissions == "full":
+        dirs: list[str] = []
+        if workspace_root.is_dir():
+            dirs = sorted(str(p) for p in workspace_root.iterdir()
+                          if p.is_dir() and not p.name.startswith("."))
+        for repo in allowlist:
+            path = workspace_root / repo
+            if path.is_dir() and str(path) not in dirs:
+                dirs.append(str(path))
+            elif not path.is_dir() and re.search(rf"\b{re.escape(repo)}\b", text,
+                                                 re.IGNORECASE):
+                print(f"[{datetime.now()}] Repo '{repo}' not cloned at {path} — "
+                      f"run: gh repo clone <owner>/{repo} {path}")
+        return dirs
     if not allowlist:
         return []
     named = [r for r in allowlist if re.search(rf"\b{re.escape(r)}\b", text, re.IGNORECASE)]
@@ -319,6 +366,7 @@ class ConversationEngine:
         heavy_model: str = "",
         repo_workspace_root: Path | None = None,
         code_repo_allowlist: list[str] | None = None,
+        permissions: str = "scoped",
     ) -> None:
         self.session_store = session_store
         self.project_root = project_root
@@ -335,6 +383,8 @@ class ConversationEngine:
         # granted per-turn through add_dirs instead. See config.CODE_REPO_ALLOWLIST.
         self.repo_workspace_root = repo_workspace_root or (Path.home() / "Projects")
         self.code_repo_allowlist = code_repo_allowlist or []
+        # "full" or "scoped" — see config.CHAT_PERMISSIONS.
+        self.permissions = permissions if permissions in ("full", "scoped") else "scoped"
         # Rotate the underlying Agent SDK session when it gets stale. Keeps
         # cumulative cost bounded (so we don't drift back into the $100 budget
         # cap) and keeps the in-context history short (faster + cheaper turns).
@@ -509,6 +559,7 @@ class ConversationEngine:
             message.text,
             self.repo_workspace_root,
             self.code_repo_allowlist,
+            self.permissions,
         )
         print(
             f"[{datetime.now()}] Runtime profile={runtime_policy.name} "
@@ -545,6 +596,8 @@ class ConversationEngine:
             existing.message_count = 0
             existing.total_cost_usd = 0.0
             existing.created_at = datetime.now()
+
+        mcp_servers = _load_mcp_servers(self.permissions)
 
         # Build Agent SDK options
         options_kwargs: dict[str, Any] = {
@@ -616,7 +669,7 @@ class ConversationEngine:
                     "\n"
                 ),
             },
-            "mcp_servers": _load_apify_mcp(),
+            "mcp_servers": mcp_servers,
             "allowed_tools": [
                 "Read",
                 "Write",
@@ -680,8 +733,22 @@ class ConversationEngine:
         if self.cli_path:
             options_kwargs["cli_path"] = self.cli_path
         options_kwargs["can_use_tool"] = _make_permission_callback(
-            self.project_root / ".claude" / "scripts"
+            self.project_root / ".claude" / "scripts", self.permissions
         )
+        if self.permissions == "full":
+            # Pre-approve every configured MCP server's tools (server-prefix
+            # form) so they never hit the prompt path at all.
+            options_kwargs["allowed_tools"] = list(options_kwargs["allowed_tools"]) + [
+                f"mcp__{name}" for name in mcp_servers
+            ]
+            options_kwargs["system_prompt"]["append"] += (
+                "\n## Access\n"
+                "You have full read/write access on this Mac: every repo under "
+                f"{self.repo_workspace_root}, your own .claude/scripts, and every configured "
+                "MCP server. Do not tell the owner something is 'outside your scope' — the "
+                "only refusals are writes to credential files and the destructive-command "
+                "deny list. If a repo isn't cloned, clone it with `gh repo clone` and proceed.\n"
+            )
         if repo_dirs:
             options_kwargs["add_dirs"] = repo_dirs
 

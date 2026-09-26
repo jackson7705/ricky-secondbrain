@@ -252,6 +252,18 @@ CODE_REPO_ALLOWLIST = [
     ).split(",")
     if r.strip()
 ]
+# How much of the Mac the chat agent may touch:
+#   full   (default) — read/write anywhere, every repo under REPO_WORKSPACE_ROOT on
+#            every turn, every MCP server in ~/.claude.json. Secret files (.env,
+#            credentials, tokens, keys) stay unwritable and the dangerous-command
+#            deny list still applies. Owner's call 2026-09-26: "full control, no
+#            blockers" — Ricky is driven from the owner's phone.
+#   scoped — writes only inside .claude/scripts/, allowlisted repos only on
+#            code-shaped turns, apify + redis-iris MCP only. For teammates who
+#            want a fenced Ricky.
+CHAT_PERMISSIONS = os.getenv("CHAT_PERMISSIONS", "full").strip().lower() or "full"
+if CHAT_PERMISSIONS not in ("full", "scoped"):
+    CHAT_PERMISSIONS = "full"
 CHAT_ALLOWED_USERS = os.getenv("CHAT_ALLOWED_USERS", SLACK_OWNER_USER_ID).split(",")
 
 # Discord chat surface (works on any OS — unlike BlueBubbles)
