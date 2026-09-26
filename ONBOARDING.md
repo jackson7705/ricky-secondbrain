@@ -38,6 +38,8 @@ Create/collect these first — the config step needs them:
 - [ ] *(optional)* **Fathom** API key — meeting action items
 - [ ] *(optional)* **Redis Iris** URL + Context Retriever agent key
 - [ ] *(optional)* **Apify** token — web scraping
+- [ ] *(optional)* **TypeSafe** API key — judgment layer Ricky uses to decide, fact-check,
+      and review deliverables before sending (`typesafe` skill)
 
 ---
 

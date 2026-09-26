@@ -1,0 +1,73 @@
+{
+  "name": "seo-article",
+  "description": "An SEO/AEO article or service page. Put the target query and business in --brief.",
+  "pass_score": 75,
+  "dimensions": {
+    "matches_search_intent": {
+      "weight": 3,
+      "requires_brief": true,
+      "instructions": "`brief` names the target search query and the business. How well does `deliverable` give a person searching that query what they came for?",
+      "levels": [
+        "About a different topic than the query",
+        "On the topic but serves a different need, such as explaining a concept when the searcher wants a provider or price",
+        "Serves the searcher's need but makes them dig through unrelated material first",
+        "Serves the searcher's need directly from the top of the page"
+      ]
+    },
+    "answer_first": {
+      "weight": 2,
+      "instructions": "How directly do the sections of `deliverable` answer the question their heading raises?",
+      "levels": [
+        "Sections open with background or filler and rarely give a direct answer",
+        "A few sections open with a direct answer; most build up to it",
+        "Most sections open with a direct answer in the first sentence or two",
+        "Every section opens with a direct, self-contained answer that could be quoted on its own"
+      ]
+    },
+    "first_hand_detail": {
+      "weight": 2,
+      "instructions": "How much of `deliverable` shows real, first-hand knowledge of the business, its location, or the work?",
+      "levels": [
+        "Entirely generic content that any website could publish unchanged",
+        "Mentions the business or location by name but adds no real detail about them",
+        "Includes some concrete detail such as prices, processes, local specifics, or examples",
+        "Rich in concrete detail: real prices, processes, local specifics, and examples throughout"
+      ]
+    },
+    "depth": {
+      "weight": 2,
+      "instructions": "How thoroughly does `deliverable` cover what a searcher would need to know?",
+      "levels": [
+        "Surface-level: restates the obvious and leaves the main questions unanswered",
+        "Covers the basics but skips the follow-up questions a searcher would have",
+        "Covers the main question and most follow-up questions",
+        "Covers the main question and the follow-up questions, including cost, timing, or trade-offs where they apply"
+      ]
+    },
+    "natural_writing": {
+      "weight": 1,
+      "instructions": "How natural is the writing in `deliverable`?",
+      "levels": [
+        "Keyword-stuffed or obviously machine-written, with repeated phrases and empty intensifiers",
+        "Readable but formulaic, with stock phrases and padded transitions",
+        "Reads naturally with occasional stock phrasing",
+        "Reads like a knowledgeable person wrote it"
+      ]
+    }
+  },
+  "blockers": {
+    "placeholder_text": {
+      "instructions": "Does `deliverable` contain leftover placeholder or template text, such as bracketed fill-ins, 'TODO', 'lorem ipsum', or 'insert X here'?"
+    },
+    "unverifiable_superlatives": {
+      "instructions": "Does `deliverable` claim the business is the best, number one, top-rated, or award-winning without naming the award, rating source, or evidence?"
+    },
+    "wrong_business_or_location": {
+      "instructions": "Does `deliverable` name a business or a city that conflicts with the business or location given in `brief`?",
+      "requires_brief": true
+    },
+    "ai_commentary_exposed": {
+      "instructions": "Does `deliverable` contain AI assistant commentary, such as 'Here is the article', 'As an AI', or notes about how the content was produced?"
+    }
+  }
+}

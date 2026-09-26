@@ -310,6 +310,10 @@ CIRCLE_HEADLESS_TOKEN = os.getenv("CIRCLE_HEADLESS_TOKEN", "")
 CIRCLE_MEMBER_EMAIL = os.getenv("CIRCLE_MEMBER_EMAIL", "")
 CIRCLE_COMMUNITY_MEMBER_ID = int(os.getenv("CIRCLE_COMMUNITY_MEMBER_ID", "0"))
 
+# TypeSafe — Jev judgment layer (decide / check / review / rank). Optional.
+TYPESAFE_API_KEY = os.getenv("TYPESAFE_API_KEY", "").strip()
+TYPESAFE_MODEL = os.getenv("TYPESAFE_MODEL", "jev-latest").strip()
+
 # === Drafts & Habits ===
 DRAFTS_DIR = MEMORY_DIR / "drafts"
 DRAFTS_ACTIVE_DIR = DRAFTS_DIR / "active"

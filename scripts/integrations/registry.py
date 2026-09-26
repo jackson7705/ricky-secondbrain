@@ -93,6 +93,13 @@ _REGISTRY: dict[str, IntegrationInfo] = {
         required_config=["CIRCLE_ADMIN_TOKEN"],
         module_path="integrations.circle_api",
     ),
+    "typesafe": IntegrationInfo(
+        name="typesafe",
+        display_name="TypeSafe",
+        auth_type="token",
+        required_config=["TYPESAFE_API_KEY"],
+        module_path="integrations.typesafe_api",
+    ),
 }
 
 

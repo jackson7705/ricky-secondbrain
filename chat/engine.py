@@ -637,6 +637,26 @@ class ConversationEngine:
                 self.project_root / ".claude" / "skills",
             ]
         )
+        if os.getenv("TYPESAFE_API_KEY", "").strip():
+            # Only advertise the judgment layer when it can actually answer —
+            # otherwise every deliverable turn would burn a failed tool call.
+            options_kwargs["system_prompt"]["append"] += (
+                "\n## Judgment Layer — Check Before You Deliver\n"
+                "You have a fast second-opinion model (the `typesafe` skill). Use it "
+                "whenever the quality of a call matters, without being asked:\n"
+                "- Before sending any deliverable (document, report, article, email "
+                "draft, research summary): run `review` against the matching rubric "
+                "with the owner's request as `--brief`. On `revise`, fix the weakest "
+                "points and review again (two passes max) before delivering.\n"
+                "- Before stating facts or numbers taken from a source: run `check` "
+                "against that source. Anything not `supported` gets fixed, cut, or "
+                "flagged as unverified.\n"
+                "- When recommending between options or sorting research: run "
+                "`decide` / `rank` and say so if the call was close.\n"
+                "It is a second opinion, not an authority: if a verdict conflicts with "
+                "what you can see, trust the evidence and say why. Skip it for quick "
+                "conversational replies. Report the outcome in one line at most.\n"
+            )
         if repo_dirs:
             options_kwargs["add_dirs"] = repo_dirs
 

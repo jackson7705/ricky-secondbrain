@@ -48,7 +48,7 @@ if [ -f "$ENV_FILE" ]; then ok ".env exists"; else bad ".env missing — copy sc
 req OWNER_NAME; req OWNER_EMAILS
 req CLICKUP_API_TOKEN; req CLICKUP_OWNER_UID; req CLICKUP_INBOX_LIST_ID
 req DRIVE_BRIEFINGS_FOLDER_ID
-opt FATHOM_API_KEY; opt REDIS_URL; opt CONTEXT_RETRIEVER_AGENT_KEY; opt APIFY_TOKEN
+opt FATHOM_API_KEY; opt REDIS_URL; opt CONTEXT_RETRIEVER_AGENT_KEY; opt APIFY_TOKEN; opt TYPESAFE_API_KEY
 echo
 
 echo "[3b] Chat surface (need at least one)"

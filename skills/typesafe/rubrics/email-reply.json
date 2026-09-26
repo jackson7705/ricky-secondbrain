@@ -1,0 +1,61 @@
+{
+  "name": "email-reply",
+  "description": "A drafted email reply. Put the email being answered in --brief.",
+  "pass_score": 75,
+  "dimensions": {
+    "answers_what_was_asked": {
+      "weight": 3,
+      "requires_brief": true,
+      "instructions": "`brief` is the email being replied to and `deliverable` is the drafted reply. How completely does the reply respond to the questions and requests in the email?",
+      "levels": [
+        "Responds to none of the questions or requests in the email",
+        "Responds to a minor point but not the main question or request",
+        "Responds to the main question or request but skips others that were asked",
+        "Responds to every question and request in the email"
+      ]
+    },
+    "brevity": {
+      "weight": 2,
+      "instructions": "How well does the length of `deliverable` match what it needs to say?",
+      "levels": [
+        "Several times longer than needed, with repeated or irrelevant content",
+        "Noticeably padded with pleasantries, restating, or over-explaining",
+        "Slightly longer than needed",
+        "Says what is needed and nothing more"
+      ]
+    },
+    "tone_fit": {
+      "weight": 2,
+      "instructions": "How well does the tone of `deliverable` suit a direct, friendly business owner writing to a colleague or client?",
+      "levels": [
+        "Rude, cold, or likely to offend the recipient",
+        "Stiff and corporate, or gushing and over-apologetic",
+        "Mostly natural with a few stiff or overly formal phrases",
+        "Sounds like a real person: direct, warm, and professional"
+      ]
+    },
+    "clear_next_step": {
+      "weight": 2,
+      "instructions": "How clear is it from `deliverable` what happens next and who does it?",
+      "levels": [
+        "No indication of what happens next",
+        "Implies a next step without saying who does it or when",
+        "States the next step but leaves either the owner or the timing open",
+        "States the next step, who does it, and when"
+      ]
+    }
+  },
+  "blockers": {
+    "commits_to_something_new": {
+      "instructions": "Does `deliverable` promise a price, discount, refund, deadline, deliverable, or meeting time that is not already stated in `brief`?",
+      "requires_brief": true
+    },
+    "placeholder_text": {
+      "instructions": "Does `deliverable` contain leftover placeholder text, such as bracketed fill-ins like [Name], 'TODO', or 'insert X here'?"
+    },
+    "wrong_recipient_details": {
+      "instructions": "Does `deliverable` address the recipient by a name, company, or detail that conflicts with `brief`?",
+      "requires_brief": true
+    }
+  }
+}
