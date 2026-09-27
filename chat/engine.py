@@ -23,22 +23,30 @@ sys.path.insert(0, str(_SCRIPTS_DIR))
 from sanitize import TRUST_BOUNDARY_INSTRUCTION, wrap_external_data  # noqa: E402
 
 
-# ── Apify MCP loader ──────────────────────────────────────────────────────
+# ── MCP server loader ─────────────────────────────────────────────────────
 #
-# Pull the apify MCP server config from ~/.claude.json so Ricky can scrape
+# Pull MCP server configs from ~/.claude.json so Ricky can scrape the web and
 # short-form video / social engagement data conversationally (content-research
-# over iMessage). Mirrors weekly_content.py's _load_apify_mcp so both the
-# scheduled pipeline and the chat agent share one Apify wiring. Token stays
-# in-process, never logged. Returns {} if apify isn't configured, so the
-# engine degrades gracefully to WebSearch rather than crashing.
-_SCOPED_MCP_SERVERS = ("apify", "redis-iris")
+# over iMessage). weekly_content.py loads the same `mcp-scraper` entry, so the
+# scheduled pipeline and the chat agent share one wiring. Keys stay in-process,
+# never logged. Returns {} if a server isn't configured, so the engine degrades
+# gracefully to WebSearch rather than crashing.
+_SCOPED_MCP_SERVERS = ("mcp-scraper", "redis-iris")
+_SCRAPER_RESEARCH_TOOLS = (
+    "search_serp", "harvest_paa", "extract_url", "extract_site", "map_site_urls",
+    "maps_search", "maps_place_intel", "youtube_harvest", "youtube_transcribe",
+    "instagram_profile_content", "instagram_media_download",
+    "reddit_trending", "reddit_thread", "facebook_ad_search", "facebook_page_intel",
+    "google_ads_search", "google_ads_page_intel", "trustpilot_reviews", "g2_reviews",
+    "credits_info",
+)
 
 
 def _load_mcp_servers(permissions: str = "scoped") -> dict:
     """Pull MCP servers from ~/.claude.json for the chat agent.
 
     scoped: only
-    - `apify`: short-form/social scraping for content-research.
+    - `mcp-scraper`: web, SERP, maps and social scraping (replaced Apify).
     - `redis-iris`: Context Retriever query tools over the structured data
       (invoices/vendors/clients) — the additive Redis Iris layer alongside the
       Obsidian vault. See .claude/scripts/redis_iris/.
@@ -56,10 +64,6 @@ def _load_mcp_servers(permissions: str = "scoped") -> dict:
     if permissions == "full":
         return {name: spec for name, spec in servers.items() if spec}
     return {name: servers[name] for name in _SCOPED_MCP_SERVERS if servers.get(name)}
-
-
-def _load_apify_mcp() -> dict:  # back-compat alias
-    return _load_mcp_servers("scoped")
 
 
 # ── Task runtime profiles ────────────────────────────────────────────────
@@ -687,14 +691,13 @@ class ConversationEngine:
                 # Tool name verified against the bundled CLI (2.1.114): the tool
                 # registers as "Agent" with "Task" as a legacy alias.
                 "Agent",
-                # Apify MCP — lets content-research score real engagement
+                # MCP Scraper — lets content-research score real engagement
                 # (view counts) on short-form refs instead of best-effort
-                # site:-restricted guessing. No-op if apify isn't configured.
-                "mcp__apify__search-actors",
-                "mcp__apify__fetch-actor-details",
-                "mcp__apify__call-actor",
-                "mcp__apify__get-dataset-items",
-                "mcp__apify__get-actor-run",
+                # site:-restricted guessing. Read-only research tools only: the
+                # server also exposes sends (Gmail, Slack, calendar) and logged-in
+                # browser sessions, which stay behind the permission callback
+                # unless CHAT_PERMISSIONS=full. No-op if it isn't configured.
+                *(f"mcp__mcp-scraper__{tool}" for tool in _SCRAPER_RESEARCH_TOOLS),
                 # Redis Iris Context Retriever — structured queries over
                 # invoices / vendors / clients (see .claude/scripts/redis_iris).
                 "mcp__redis-iris__get_invoice_by_id",

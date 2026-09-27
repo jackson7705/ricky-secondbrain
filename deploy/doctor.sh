@@ -48,7 +48,7 @@ if [ -f "$ENV_FILE" ]; then ok ".env exists"; else bad ".env missing — copy sc
 req OWNER_NAME; req OWNER_EMAILS
 req CLICKUP_API_TOKEN; req CLICKUP_OWNER_UID; req CLICKUP_INBOX_LIST_ID
 req DRIVE_BRIEFINGS_FOLDER_ID
-opt FATHOM_API_KEY; opt REDIS_URL; opt CONTEXT_RETRIEVER_AGENT_KEY; opt APIFY_TOKEN; opt TYPESAFE_API_KEY
+opt FATHOM_API_KEY; opt REDIS_URL; opt CONTEXT_RETRIEVER_AGENT_KEY; opt MCP_SCRAPER_API_KEY; opt TYPESAFE_API_KEY
 echo
 
 echo "[3b] Chat surface (need at least one)"
@@ -80,7 +80,7 @@ if [ -f "$HOME/.claude.json" ]; then
   python3 -c "import json;d=json.load(open('$HOME/.claude.json'));m=d.get('mcpServers',{});print('  servers:',', '.join(m) or '(none)')" 2>/dev/null \
     && ok "~/.claude.json parses" || wrn "~/.claude.json present but unreadable"
 else
-  wrn "~/.claude.json missing — Apify/Redis MCP tools unavailable (see ONBOARDING.md)"
+  wrn "~/.claude.json missing — MCP Scraper/Redis MCP tools unavailable (see ONBOARDING.md)"
 fi
 echo
 

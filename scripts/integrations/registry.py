@@ -93,6 +93,13 @@ _REGISTRY: dict[str, IntegrationInfo] = {
         required_config=["CIRCLE_ADMIN_TOKEN"],
         module_path="integrations.circle_api",
     ),
+    "mcp_scraper": IntegrationInfo(
+        name="mcp_scraper",
+        display_name="MCP Scraper",
+        auth_type="token",
+        required_config=["MCP_SCRAPER_API_KEY"],
+        module_path="integrations.mcp_scraper",
+    ),
     "typesafe": IntegrationInfo(
         name="typesafe",
         display_name="TypeSafe",

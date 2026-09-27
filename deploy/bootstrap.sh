@@ -74,7 +74,7 @@ say "6/7  MCP servers (~/.claude.json)"
 if [ -f "$HOME/.claude.json" ] && python3 -c "import json,sys;d=json.load(open('$HOME/.claude.json'));sys.exit(0 if d.get('mcpServers') else 1)" 2>/dev/null; then
   ok "~/.claude.json already has mcpServers"
 else
-  todo "Add Apify + Redis-Iris MCP servers to ~/.claude.json — see ONBOARDING.md → MCP config (uses APIFY_TOKEN / CONTEXT_RETRIEVER_* from your .env)."
+  todo "Add MCP Scraper + Redis-Iris MCP servers to ~/.claude.json — see ONBOARDING.md → MCP config (uses MCP_SCRAPER_API_KEY / CONTEXT_RETRIEVER_* from your .env)."
 fi
 
 # ── 7. Manual checklist + launchd ────────────────────────────────────────────

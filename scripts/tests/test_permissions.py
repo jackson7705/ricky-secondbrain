@@ -61,11 +61,11 @@ def test_full_mode_loads_every_configured_mcp_server(
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     (tmp_path / ".claude.json").write_text(json.dumps({"mcpServers": {
-        "apify": {"command": "npx"}, "vercel": {"url": "https://mcp.vercel.com"},
+        "mcp-scraper": {"command": "npx"}, "vercel": {"url": "https://mcp.vercel.com"},
         "redis-iris": {"command": "uv"}, "broken": None,
     }}))
-    assert set(_load_mcp_servers("full")) == {"apify", "vercel", "redis-iris"}
-    assert set(_load_mcp_servers("scoped")) == {"apify", "redis-iris"}
+    assert set(_load_mcp_servers("full")) == {"mcp-scraper", "vercel", "redis-iris"}
+    assert set(_load_mcp_servers("scoped")) == {"mcp-scraper", "redis-iris"}
 
 
 class _Store:
@@ -135,3 +135,31 @@ def test_judgment_layer_is_advertised_only_when_configured(
 
     asyncio.run(run())
     assert ("Judgment Layer" in captured["append"]) is advertised
+
+
+def test_scoped_chat_preapproves_scraper_research_but_not_sends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import claude_agent_sdk
+    from claude_agent_sdk import AssistantMessage, TextBlock
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    captured: dict[str, Any] = {}
+
+    async def fake_query(*, prompt: Any, options: Any) -> Any:
+        captured["allowed"] = options.allowed_tools
+        yield AssistantMessage(content=[TextBlock(text="ok")], model="m")
+
+    monkeypatch.setattr(claude_agent_sdk, "query", fake_query)
+    engine = ConversationEngine(_Store(), tmp_path, permissions="scoped")  # type: ignore[arg-type]
+    incoming = IncomingMessage(text="hi", user=User(Platform.IMESSAGE, "u"),
+                               channel=Channel(Platform.IMESSAGE, "c"), platform=Platform.IMESSAGE)
+
+    async def run() -> list[OutgoingMessage]:
+        return [o async for o in engine.handle_message(incoming)]
+
+    asyncio.run(run())
+    assert "mcp__mcp-scraper__search_serp" in captured["allowed"]
+    assert "mcp__mcp-scraper" not in captured["allowed"]
+    assert not [t for t in captured["allowed"] if "send" in t or "browser" in t]
+    assert not [t for t in captured["allowed"] if "apify" in t]

@@ -1,13 +1,13 @@
 """Weekly content engine — Sunday 8am.
 
-Discovers viral AEO/SEO short-form content across creators (TikTok + Instagram via
-the Apify MCP), writes 5 standalone viral scripts in Jason's voice using the
+Discovers viral AEO/SEO short-form content across creators (YouTube, TikTok and
+Instagram via the MCP Scraper MCP), writes 5 standalone viral scripts in Jason's voice using the
 short-form-script hook library, and drops them into a fresh Google Doc in the
 "Ideas" Drive folder so Jason can plan the week ahead.
 
 Architecture mirrors heartbeat.py: the Agent SDK does the discovery + writing, then
 deterministic Python creates the Google Doc (drive.file) and notifies. Runs locally
-via launchd because it needs the Apify MCP, the skills, and the Drive write that
+via launchd because it needs the MCP Scraper MCP, the skills, and the Drive write that
 only exist on this machine.
 """
 from __future__ import annotations
@@ -37,12 +37,12 @@ RESEARCH_DIR = MEMORY_DIR / "research-logs"
 HOOKS_DB = Path.home() / ".claude/skills/short-form-script/references/hooks-database.json"
 
 
-def _load_apify_mcp() -> dict:
-    """Pull the apify MCP server config from ~/.claude.json so the headless agent
-    can scrape. Token stays in-process, never logged."""
+def _load_scraper_mcp() -> dict:
+    """Pull the mcp-scraper MCP server config from ~/.claude.json so the headless
+    agent can scrape. Key stays in-process, never logged."""
     cfg = json.load(open(os.path.expanduser("~/.claude.json")))
-    apify = cfg.get("mcpServers", {}).get("apify")
-    return {"apify": apify} if apify else {}
+    scraper = cfg.get("mcpServers", {}).get("mcp-scraper")
+    return {"mcp-scraper": scraper} if scraper else {}
 
 
 def _week_label() -> str:
@@ -64,14 +64,15 @@ PROMPT_TEMPLATE = """You are running Jason Jackson's weekly content engine. Prod
 - Sell visibility and trust, not leads. Never promise leads, revenue, or guaranteed rankings. If a script needs a specific statistic, keep it general or attribute it to "recent studies" rather than inventing a precise number.
 - NO em dashes and NO emojis anywhere in scripts or hooks (the green circle in headings below is the one exception, keep it). Use commas, periods, or hyphens.
 
-# Step 1 — Discover viral content (use the Apify MCP, not WebSearch)
+# Step 1 — Discover viral content (use the MCP Scraper tools, not WebSearch)
 Find viral, on-topic content across MANY creators (do not rely on a fixed list, discover new ones):
-- TikTok: mcp__apify__call-actor with actor "clockworks/tiktok-scraper", input {{"searchQueries": ["AI search optimization","answer engine optimization","AI overviews SEO","rank on ChatGPT","GEO SEO AI"], "searchSection": "/video", "videoSearchSorting": "MOST_LIKED", "videoSearchDateFilter": "LAST_3_MONTHS", "resultsPerPage": 8, "excludePinnedPosts": true}}, then mcp__apify__get-dataset-items.
-- Instagram: mcp__apify__call-actor with actor "apify/instagram-scraper", input {{"directUrls": ["https://www.instagram.com/explore/tags/aisearch/","https://www.instagram.com/explore/tags/aeo/","https://www.instagram.com/explore/tags/answerengineoptimization/"], "resultsType": "reels", "resultsLimit": 12, "onlyPostsNewerThan": "3 months"}}, then mcp__apify__get-dataset-items.
-- Keep total Apify spend under $1. Filter OUT off-topic noise (rankings memes, non-English, unrelated AI tool lists). Keep clips with a clear claim Jason can teach around, decent engagement, English.
+- YouTube (strongest signal, real view counts): mcp__mcp-scraper__youtube_harvest with mode "search", maxVideos 15, once per query for "AI search optimization", "answer engine optimization", "AI overviews SEO", "rank on ChatGPT", "GEO SEO AI". Prefer Shorts and videos under 3 minutes; rank by views.
+- TikTok and Instagram: mcp__mcp-scraper__search_serp with recency "month" and queries like site:tiktok.com "answer engine optimization" or site:instagram.com/reel "AI search". Results are thin and carry no engagement counts, so treat them as leads: confirm an Instagram reel with mcp__mcp-scraper__instagram_media_download (caption and creator), and check a promising creator's other posts with mcp__mcp-scraper__instagram_profile_content.
+- If a search returns a verification challenge or nothing, move on to the next query rather than retrying it. Never invent a clip, a creator, or a view count: only use what a tool returned.
+- Keep total MCP Scraper spend under 1,500 credits and do not transcribe videos. Filter OUT off-topic noise (rankings memes, non-English, unrelated AI tool lists). Keep clips with a clear claim Jason can teach around, decent engagement, English.
 
 # Step 2 — Pick 5
-- 5 ideas, ONE per creator (5 distinct creators). Spread across TikTok and Instagram. Favor viral / high-engagement, on-niche, reactable clips.
+- 5 ideas, ONE per creator (5 distinct creators). Spread across platforms where the results allow it; if TikTok and Instagram came back thin, use more YouTube rather than a weak clip. Favor viral / high-engagement, on-niche, reactable clips.
 
 # Step 3 — Write standalone viral scripts
 - Read the hook library at {hooks_db} and pull 5-6 hooks per idea that fit the topic (adapt wording to the specific idea).
@@ -105,7 +106,7 @@ When the file is written, reply with just the 5 idea titles and the platforms. D
 
 async def run_agent(output_md: Path) -> str:
     prompt = PROMPT_TEMPLATE.format(hooks_db=HOOKS_DB, output_md=output_md)
-    mcp = _load_apify_mcp()
+    mcp = _load_scraper_mcp()
     response_text = ""
     async for message in query(
         prompt=prompt,
@@ -116,9 +117,10 @@ async def run_agent(output_md: Path) -> str:
             mcp_servers=mcp,
             allowed_tools=[
                 "Read", "Write", "Edit", "Bash", "Glob", "Grep", "Skill",
-                "mcp__apify__call-actor",
-                "mcp__apify__get-dataset-items",
-                "mcp__apify__fetch-actor-details",
+                "mcp__mcp-scraper__youtube_harvest",
+                "mcp__mcp-scraper__search_serp",
+                "mcp__mcp-scraper__instagram_media_download",
+                "mcp__mcp-scraper__instagram_profile_content",
             ],
             permission_mode="bypassPermissions",
             max_turns=80,

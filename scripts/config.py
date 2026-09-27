@@ -259,7 +259,7 @@ CODE_REPO_ALLOWLIST = [
 #            deny list still applies. Owner's call 2026-09-26: "full control, no
 #            blockers" — Ricky is driven from the owner's phone.
 #   scoped — writes only inside .claude/scripts/, allowlisted repos only on
-#            code-shaped turns, apify + redis-iris MCP only. For teammates who
+#            code-shaped turns, mcp-scraper + redis-iris MCP only. For teammates who
 #            want a fenced Ricky.
 CHAT_PERMISSIONS = os.getenv("CHAT_PERMISSIONS", "full").strip().lower() or "full"
 if CHAT_PERMISSIONS not in ("full", "scoped"):

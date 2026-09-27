@@ -2,9 +2,9 @@
 """flight_watch.py — hourly fare watcher that pings the owner when a route
 drops significantly or a flash deal shows up.
 
-Deterministic: no LLM in the loop. Hits Google Flights through an Apify actor,
-compares the cheapest bookable itinerary against the lowest price seen so far,
-and only notifies when a threshold is actually crossed.
+Deterministic: no LLM in the loop. Reads Google Flights through an MCP Scraper
+hosted browser session, compares the cheapest bookable itinerary against the
+lowest price seen so far, and only notifies when a threshold is actually crossed.
 
 Watches are declared in WATCHES below. State (best price seen, last alerted
 price, history) lives in .claude/data/state/flight-watch-state.json.
@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -30,11 +31,11 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 import config  # noqa: E402
+from integrations.mcp_scraper import read_page  # noqa: E402
 from shared import append_to_daily_log, load_state, save_state  # noqa: E402
 
 STATE_FILE = config.STATE_DIR / "flight-watch-state.json"
-ACTOR = "automation-lab~google-flights-scraper"
-APIFY_SYNC_URL = "https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items"
+FLIGHTS_URL = "https://www.google.com/travel/flights?q={query}&hl=en&gl=us&curr=USD"
 
 # Itineraries longer than this are ignored when picking "cheapest" — a $430 fare
 # that takes 24 hours is not a deal worth waking someone up for.
@@ -64,42 +65,91 @@ WATCHES = [
 ]
 
 
-# ── apify ────────────────────────────────────────────────────────────────────
-def _apify_token() -> str:
-    """Prefer APIFY_TOKEN from .env; fall back to the token the apify MCP
-    server already uses in ~/.claude.json so this needs no new plumbing."""
-    import os
+# ── google flights via mcp scraper ───────────────────────────────────────────
+_TIME = re.compile(r"^\d{1,2}:\d{2}\s?[AP]M(\+\d)?$")
+_PRICE = re.compile(r"^\$([\d,]+)$")
+_STOPS = re.compile(r"^(\d+) stops?$")
+_DURATION = re.compile(r"^(?:(\d+) hr)?\s*(?:(\d+) min)?$")
+_RESULTS = re.compile(r"\b\d+ results? returned")
 
-    token = os.environ.get("APIFY_TOKEN", "").strip()
-    if token:
-        return token
-    try:
-        cfg = json.loads(Path.home().joinpath(".claude.json").read_text())
-        return cfg["mcpServers"]["apify"]["env"]["APIFY_TOKEN"].strip()
-    except Exception as exc:  # noqa: BLE001
-        raise RuntimeError(f"no APIFY_TOKEN available ({type(exc).__name__})") from exc
+
+def search_url(watch: dict) -> str:
+    """Google Flights reads the trip from a plain-language query. Asking for
+    nonstop there applies the stops filter, so a nonstop watch never has its
+    fares pushed below the fold by cheaper connections."""
+    query = "Nonstop flights" if watch.get("nonstop_only") else "Flights"
+    query += f" from {watch['origin']} to {watch['destination']} on {watch['depart']}"
+    if watch.get("return"):
+        query += f" through {watch['return']}"
+    if watch.get("cabin", "economy") != "economy":
+        query += f" {watch['cabin']} class"
+    if watch.get("adults", 1) > 1:
+        query += f" for {watch['adults']} adults"
+    return FLIGHTS_URL.format(query=quote(query))
+
+
+def _minutes(text: str) -> int:
+    match = _DURATION.match(text)
+    if not match or not any(match.groups()):
+        return 0
+    return int(match.group(1) or 0) * 60 + int(match.group(2) or 0)
+
+
+def parse_fares(text: str, watch: dict) -> list[dict]:
+    """Itineraries from the visible text of a Google Flights results page.
+
+    Each result is a run of lines: departure, dash, arrival, airline, duration,
+    route, stops, (layover), emissions, bag counts, price. Anything that does
+    not match the watched route is ignored.
+    """
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    route = f"{watch['origin']}–{watch['destination']}"
+    url = search_url(watch)
+    items: list[dict] = []
+    i = 0
+    while i < len(lines) - 3:
+        if not (_TIME.match(lines[i]) and lines[i + 1] in ("–", "-") and _TIME.match(lines[i + 2])):
+            i += 1
+            continue
+        block = lines[i + 3 : i + 16]
+        for j, line in enumerate(block):  # a result ends where the next one starts
+            if _TIME.match(line) and j + 1 < len(block) and block[j + 1] in ("–", "-"):
+                block = block[:j]
+                break
+        price = next((m.group(1) for ln in block if (m := _PRICE.match(ln))), None)
+        stops = next(
+            (0 if ln == "Nonstop" else int(m.group(1)) for ln in block
+             if ln == "Nonstop" or (m := _STOPS.match(ln))),
+            None,
+        )
+        if price and stops is not None and route in block and block:
+            duration = next((ln for ln in block[1:] if _minutes(ln)), "")
+            items.append(
+                {
+                    "price": float(price.replace(",", "")),
+                    "stops": stops,
+                    "airline": block[0].split("Operated by")[0].strip(),
+                    "duration": duration,
+                    "durationMinutes": _minutes(duration),
+                    "departureTime": lines[i],
+                    "url": url,
+                }
+            )
+        i += 3
+    return items
 
 
 def fetch_fares(watch: dict) -> list[dict]:
-    payload = {
-        "origin": watch["origin"],
-        "destination": watch["destination"],
-        "departureDate": watch["depart"],
-        "returnDate": watch["return"],
-        "adults": watch.get("adults", 1),
-        "cabinClass": watch.get("cabin", "economy"),
-        # Nonstops are a thin slice of this route, so pull a wide result set or
-        # the only nonstop can fall off the end of the page.
-        "maxResults": 60,
-        "currency": "USD",
-    }
-    url = f"{APIFY_SYNC_URL.format(actor=ACTOR)}?token={_apify_token()}"
-    req = urllib.request.Request(
-        url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(req, timeout=180) as resp:
-        items = json.loads(resp.read().decode())
-    return items if isinstance(items, list) else []
+    text = read_page(search_url(watch), ready=lambda t: bool(_RESULTS.search(t)))
+    # Refuse to score a page we cannot tie to this trip: a misread query would
+    # otherwise report another day's fares as a price drop.
+    if watch["origin"] not in text or watch["destination"] not in text:
+        raise RuntimeError("results page does not show the watched route")
+    if f"departing {watch['depart']}" not in text:
+        raise RuntimeError("results page does not show the watched departure date")
+    if watch.get("return") and f"returning {watch['return']}" not in text:
+        raise RuntimeError("results page does not show the watched return date")
+    return parse_fares(text, watch)
 
 
 # ── scoring ──────────────────────────────────────────────────────────────────

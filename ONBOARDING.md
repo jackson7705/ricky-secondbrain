@@ -37,7 +37,7 @@ Create/collect these first — the config step needs them:
 - [ ] **ClickUp** account + a personal API token + an "Inbox" list
 - [ ] *(optional)* **Fathom** API key — meeting action items
 - [ ] *(optional)* **Redis Iris** URL + Context Retriever agent key
-- [ ] *(optional)* **Apify** token — web scraping
+- [ ] *(optional)* **MCP Scraper** API key (mcpscraper.dev) — web, SERP, maps and social scraping
 - [ ] *(optional)* **TypeSafe** API key — judgment layer Ricky uses to decide, fact-check,
       and review deliverables before sending (`typesafe` skill)
 
@@ -141,15 +141,15 @@ what's configured.
    Set `DEFAULT_GOOGLE_ACCOUNT=<profile>` in `.env`.
 
 ### 3. MCP servers (`~/.claude.json`)
-Ricky's Apify + Redis-Iris tools are configured **outside** the repo, in
+Ricky's MCP Scraper + Redis-Iris tools are configured **outside** the repo, in
 `~/.claude.json`. Add (using the teammate's own keys):
 ```jsonc
 {
   "mcpServers": {
-    "apify": {
+    "mcp-scraper": {
       "type": "stdio", "command": "npx",
-      "args": ["-y", "@apify/actors-mcp-server"],
-      "env": { "APIFY_TOKEN": "apify_api_…" }
+      "args": ["-y", "--package", "mcp-scraper@latest", "mcp-scraper"],
+      "env": { "MCP_SCRAPER_API_KEY": "sk_live_…" }
     },
     "redis-iris": {                              // optional
       "type": "http",
