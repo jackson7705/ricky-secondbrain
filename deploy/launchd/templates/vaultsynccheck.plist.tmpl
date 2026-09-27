@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>__LABEL_PREFIX__.vaultsynccheck</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>-c</string>
+		<string>PROJECT_DIR="__PROJECT_DIR__"; SCRIPTS_DIR="$PROJECT_DIR/.claude/scripts"; LOG_DIR="__LOG_DIR__"; mkdir -p "$LOG_DIR"; cd "$SCRIPTS_DIR"; export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; uv run python vault_sync_check.py &gt; "$LOG_DIR/vaultsynccheck.log" 2&gt;&amp;1</string>
+	</array>
+	<key>StartInterval</key>
+	<integer>3600</integer>
+	<key>StandardErrorPath</key>
+	<string>__LOG_DIR__/vaultsynccheck-stderr.log</string>
+	<key>StandardOutPath</key>
+	<string>__LOG_DIR__/vaultsynccheck-stdout.log</string>
+	<key>RunAtLoad</key>
+	<true/>
+</dict>
+</plist>

@@ -39,11 +39,15 @@ class McpScraperError(RuntimeError):
 
 
 def api_key() -> str:
-    """Prefer MCP_SCRAPER_API_KEY from .env; fall back to the key the MCP
-    server already uses in ~/.claude.json so scripts need no new plumbing."""
-    key = os.environ.get("MCP_SCRAPER_API_KEY", "").strip()
-    if key:
-        return key
+    """Prefer the key from .env; fall back to the key the MCP server already
+    uses in ~/.claude.json so scripts need no new plumbing.
+
+    Both spellings are read: the MCP server uses MCP_SCRAPER_API_KEY, while
+    MCP Scraper's own SDK and CLI use MCPSCRAPER_API_KEY."""
+    for name in ("MCP_SCRAPER_API_KEY", "MCPSCRAPER_API_KEY"):
+        key = os.environ.get(name, "").strip()
+        if key:
+            return key
     try:
         cfg = json.loads(Path.home().joinpath(".claude.json").read_text())
         return str(cfg["mcpServers"][MCP_SERVER_NAME]["env"]["MCP_SCRAPER_API_KEY"]).strip()

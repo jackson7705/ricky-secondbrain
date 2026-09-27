@@ -156,3 +156,12 @@ class TestRpcParsing:
     def test_structured_content_wins(self) -> None:
         result = {"structuredContent": {"a": 1}, "content": [{"type": "text", "text": "x"}]}
         assert mcp_scraper._unwrap(result) == {"a": 1}
+
+
+class TestApiKey:
+    @pytest.mark.parametrize("name", ["MCP_SCRAPER_API_KEY", "MCPSCRAPER_API_KEY"])
+    def test_either_spelling_is_read(self, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+        monkeypatch.delenv("MCP_SCRAPER_API_KEY", raising=False)
+        monkeypatch.delenv("MCPSCRAPER_API_KEY", raising=False)
+        monkeypatch.setenv(name, "key-from-env")
+        assert mcp_scraper.api_key() == "key-from-env"
